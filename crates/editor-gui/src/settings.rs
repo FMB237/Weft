@@ -12,7 +12,8 @@ use crate::theme::{Theme, ThemeMode};
 const STORAGE_KEY: &str = "editor_settings";
 
 /// Application-wide user preferences.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     /// Visual theme.
     pub theme: Theme,
@@ -22,6 +23,17 @@ pub struct Settings {
     pub auto_save_interval_secs: u64,
     /// Whether to show line numbers in the editor (reserved for future use).
     pub show_line_numbers: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            theme: Theme::default(),
+            font_size: 15.0,
+            auto_save_interval_secs: 0,
+            show_line_numbers: false,
+        }
+    }
 }
 
 impl Settings {
@@ -42,15 +54,10 @@ impl Settings {
 }
 
 /// Preferences panel rendered inside a modal window.
+#[derive(Debug, Default)]
 pub struct SettingsPanel {
     /// Whether a setting has changed and needs to be applied this frame.
     pub changed: bool,
-}
-
-impl Default for SettingsPanel {
-    fn default() -> Self {
-        Self { changed: false }
-    }
 }
 
 impl SettingsPanel {
@@ -64,22 +71,17 @@ impl SettingsPanel {
 
         // Theme.
         ui.label("Theme");
-        egui::ComboBox::from_id_source("settings_theme")
+        egui::ComboBox::from_id_salt("settings_theme")
             .selected_text(format!("{:?}", settings.theme.mode))
             .show_ui(ui, |ui| {
-                for mode in [
-                    ThemeMode::System,
-                    ThemeMode::Light,
-                    ThemeMode::Dark,
-                ] {
+                for mode in [ThemeMode::System, ThemeMode::Light, ThemeMode::Dark] {
                     if ui
-                        .selectable_label(settings.theme.mode == mode, format!("{:?}", mode))
+                        .selectable_label(settings.theme.mode == mode, format!("{mode:?}"))
                         .clicked()
+                        && settings.theme.mode != mode
                     {
-                        if settings.theme.mode != mode {
-                            settings.theme.mode = mode;
-                            self.changed = true;
-                        }
+                        settings.theme.mode = mode;
+                        self.changed = true;
                     }
                 }
             });
@@ -88,7 +90,11 @@ impl SettingsPanel {
         // Font size.
         ui.label("Editor font size (pt)");
         let mut font_size = settings.font_size;
-        ui.add(egui::DragValue::new(&mut font_size).range(8.0..=48.0).speed(0.5));
+        ui.add(
+            egui::DragValue::new(&mut font_size)
+                .range(8.0..=48.0)
+                .speed(0.5),
+        );
         if (font_size - settings.font_size).abs() > f32::EPSILON {
             settings.font_size = font_size;
             self.changed = true;
@@ -105,7 +111,10 @@ impl SettingsPanel {
         }
         ui.separator();
 
-        ui.checkbox(&mut settings.show_line_numbers, "Show line numbers (experimental)");
+        ui.checkbox(
+            &mut settings.show_line_numbers,
+            "Show line numbers (experimental)",
+        );
 
         self.changed
     }

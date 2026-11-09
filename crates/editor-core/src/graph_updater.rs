@@ -17,6 +17,12 @@ pub struct GraphUpdater<'a> {
     vault: &'a dyn FileOps,
 }
 
+impl std::fmt::Debug for GraphUpdater<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GraphUpdater").finish_non_exhaustive()
+    }
+}
+
 impl<'a> GraphUpdater<'a> {
     pub fn new(graph: &'a mut LinkGraph, vault: &'a dyn FileOps) -> Self {
         Self { graph, vault }
@@ -25,12 +31,13 @@ impl<'a> GraphUpdater<'a> {
     /// Process a single watch event against the graph.
     pub fn apply_event(&mut self, event: &WatchEvent) -> anyhow::Result<()> {
         match event {
-            WatchEvent::Created(path) | WatchEvent::Modified(path) => {
-                self.upsert_document(path)
+            WatchEvent::Created(path) | WatchEvent::Modified(path) => self.upsert_document(path),
+            WatchEvent::Deleted(path) => {
+                self.remove_document(path);
+                Ok(())
             }
-            WatchEvent::Deleted(path) => self.remove_document(path),
             WatchEvent::Renamed(from, to) => {
-                self.remove_document(from)?;
+                self.remove_document(from);
                 self.upsert_document(to)
             }
         }
@@ -38,10 +45,7 @@ impl<'a> GraphUpdater<'a> {
 
     /// Parse and index a single file, rebuilding its outgoing edges.
     fn upsert_document(&mut self, path: &Path) -> anyhow::Result<()> {
-        let content = match self.vault.read(path) {
-            Ok(c) => c,
-            Err(_) => return Ok(()),
-        };
+        let content = self.vault.read(path)?;
 
         let parsed = parse_markdown(path, &content);
 
@@ -51,14 +55,17 @@ impl<'a> GraphUpdater<'a> {
                 self.graph.update_node_path(id, path.to_path_buf());
                 id
             }
-            None => self.graph.add_node(path.to_path_buf(), parsed.frontmatter.title.clone().unwrap_or_default()),
+            None => self.graph.add_node(
+                path.to_path_buf(),
+                parsed.frontmatter.title.clone().unwrap_or_default(),
+            ),
         };
 
         // Rebuild outgoing edges: remove existing ones, then re-add from wikilinks.
         self.graph.remove_outgoing_edges(id);
 
         for link in &parsed.wikilinks {
-            let target_path = self.resolve_link(path, &link.target);
+            let target_path = Self::resolve_link(path, &link.target);
             let target_id = match self.graph.node_by_path(&target_path) {
                 Some(tid) => tid,
                 None => self.graph.add_node(target_path.clone(), String::new()),
@@ -70,15 +77,14 @@ impl<'a> GraphUpdater<'a> {
     }
 
     /// Remove a document node and all its edges.
-    fn remove_document(&mut self, path: &Path) -> anyhow::Result<()> {
+    fn remove_document(&mut self, path: &Path) {
         if let Some(id) = self.graph.node_by_path(path) {
             self.graph.remove_node(id);
         }
-        Ok(())
     }
 
     /// Resolve a wikilink target relative to the source file's directory.
-    fn resolve_link(&self, source: &Path, target: &str) -> PathBuf {
+    fn resolve_link(source: &Path, target: &str) -> PathBuf {
         let target_path = PathBuf::from(target);
         if target_path.is_absolute() {
             return target_path;
@@ -123,7 +129,9 @@ mod tests {
     #[test]
     fn updater_adds_node_and_edges_from_wikilinks() {
         let dir = tempdir().unwrap();
-        let vault = TestVault { dir: dir.path().to_path_buf() };
+        let vault = TestVault {
+            dir: dir.path().to_path_buf(),
+        };
 
         std::fs::write(dir.path().join("a.md"), "# A\nSee [[b.md]] and [[c.md]].").unwrap();
         std::fs::write(dir.path().join("b.md"), "# B\nnothing.").unwrap();
@@ -148,7 +156,9 @@ mod tests {
     #[test]
     fn updater_removes_node_on_delete() {
         let dir = tempdir().unwrap();
-        let vault = TestVault { dir: dir.path().to_path_buf() };
+        let vault = TestVault {
+            dir: dir.path().to_path_buf(),
+        };
 
         std::fs::write(dir.path().join("a.md"), "# A").unwrap();
 
@@ -173,7 +183,9 @@ mod tests {
     #[test]
     fn updater_rebuilds_edges_on_modify() {
         let dir = tempdir().unwrap();
-        let vault = TestVault { dir: dir.path().to_path_buf() };
+        let vault = TestVault {
+            dir: dir.path().to_path_buf(),
+        };
 
         std::fs::write(dir.path().join("a.md"), "# A\n[[b.md]]").unwrap();
         std::fs::write(dir.path().join("b.md"), "# B").unwrap();

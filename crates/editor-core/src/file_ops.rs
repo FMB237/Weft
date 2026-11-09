@@ -32,16 +32,18 @@ impl FileOps for crate::vault::Vault {
     }
 
     fn read(&self, path: &Path) -> Result<String> {
-        self.read(path).with_context(|| format!("read {:?}", path))
+        self.read(path)
+            .with_context(|| format!("read {}", path.display()))
     }
 
     fn write(&self, path: &Path, content: &str) -> Result<()> {
         self.write(path, content)
-            .with_context(|| format!("write {:?}", path))
+            .with_context(|| format!("write {}", path.display()))
     }
 
     fn delete(&self, path: &Path) -> Result<()> {
-        self.delete(path).with_context(|| format!("delete {:?}", path))
+        self.delete(path)
+            .with_context(|| format!("delete {}", path.display()))
     }
 
     fn resolve(&self, path: &Path) -> std::path::PathBuf {
@@ -66,7 +68,10 @@ mod tests {
         assert_eq!(vault.resolve(path), dir.path().join("note.md"));
 
         vault.delete(path).expect("delete file");
-        assert!(vault.read(path).is_err(), "deleted file should fail to read");
+        assert!(
+            vault.read(path).is_err(),
+            "deleted file should fail to read"
+        );
     }
 
     #[test]

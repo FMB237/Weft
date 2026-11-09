@@ -4,7 +4,6 @@
 //! subscribing handlers, delivery on `process`, queueing semantics,
 //! `drain`/`pending` counts, and that different event types are delivered
 //! to all subscribers without cross-contamination.
-
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -19,7 +18,7 @@ fn selected(path: &str) -> Event {
 fn event_delivered_to_subscribers_on_process() {
     let mut bus = EventBus::new();
     let received = Rc::new(RefCell::new(Vec::new()));
-    let received_copy = received.clone();
+    let received_copy = Rc::clone(&received);
 
     bus.subscribe(move |e| {
         received_copy.borrow_mut().push(e.clone());
@@ -35,7 +34,7 @@ fn event_delivered_to_subscribers_on_process() {
     assert_eq!(received.borrow().len(), 1);
     assert!(matches!(
         received.borrow()[0].clone(),
-        Event::NodeSelected(p) if p == PathBuf::from("a.md")
+        Event::NodeSelected(p) if p.as_path() == std::path::Path::new("a.md")
     ));
 }
 
@@ -43,11 +42,11 @@ fn event_delivered_to_subscribers_on_process() {
 fn multiple_subscribers_each_receive_every_event() {
     let mut bus = EventBus::new();
     let count1 = Rc::new(RefCell::new(0usize));
-    let count1_copy = count1.clone();
+    let count1_copy = Rc::clone(&count1);
     let count2 = Rc::new(RefCell::new(0usize));
-    let count2_copy = count2.clone();
+    let count2_copy = Rc::clone(&count2);
     let count3 = Rc::new(RefCell::new(0usize));
-    let count3_copy = count3.clone();
+    let count3_copy = Rc::clone(&count3);
 
     bus.subscribe(move |_| *count1_copy.borrow_mut() += 1);
     bus.subscribe(move |_| *count2_copy.borrow_mut() += 1);
@@ -78,18 +77,22 @@ fn drain_returns_queued_events_and_clears_queue() {
     // Queue is empty after drain; nothing is delivered twice.
     bus.drain(); // should be empty
     bus.process();
-    assert!(matches!(&drained[0], Event::NodeSelected(p) if p.as_path() == PathBuf::from("a.md").as_path()));
+    assert!(
+        matches!(&drained[0], Event::NodeSelected(p) if p.as_path() == std::path::Path::new("a.md"))
+    );
     assert!(matches!(&drained[1], Event::GraphChanged));
-    assert!(matches!(&drained[2], Event::NodeSelected(p) if p.as_path() == PathBuf::from("b.md").as_path()));
+    assert!(
+        matches!(&drained[2], Event::NodeSelected(p) if p.as_path() == std::path::Path::new("b.md"))
+    );
 }
 
 #[test]
 fn different_event_types_delivered_independently() {
     let mut bus = EventBus::new();
     let graph_changed = Rc::new(RefCell::new(0usize));
-    let graph_changed_copy = graph_changed.clone();
+    let graph_changed_copy = Rc::clone(&graph_changed);
     let node_selected = Rc::new(RefCell::new(Vec::new()));
-    let node_selected_copy = node_selected.clone();
+    let node_selected_copy = Rc::clone(&node_selected);
 
     bus.subscribe(move |e| {
         if matches!(e, Event::GraphChanged) {
@@ -117,7 +120,7 @@ fn different_event_types_delivered_independently() {
 fn subscriptions_persist_across_multiple_process_calls() {
     let mut bus = EventBus::new();
     let count = Rc::new(RefCell::new(0usize));
-    let count_copy = count.clone();
+    let count_copy = Rc::clone(&count);
     bus.subscribe(move |_| *count_copy.borrow_mut() += 1);
 
     bus.publish(Event::ThemeChanged);

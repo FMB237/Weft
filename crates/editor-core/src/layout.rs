@@ -123,9 +123,7 @@ pub fn layout_graph(graph: &LinkGraph, params: &LayoutParams) -> Layout {
 
     for _ in 0..iterations {
         // Reset displacements.
-        for d in disp.iter_mut() {
-            *d = Pos2::ZERO;
-        }
+        disp.fill(Pos2::ZERO);
 
         // Repulsive forces between all pairs.
         for i in 0..n {
@@ -142,13 +140,12 @@ pub fn layout_graph(graph: &LinkGraph, params: &LayoutParams) -> Layout {
 
         // Attractive forces along edges.
         for edge in graph.edges() {
-            let i = index_position(&index, edge.source);
-            let j = index_position(&index, edge.target);
-            if i.is_none() || j.is_none() {
+            let Some(i) = index_position(&index, edge.source) else {
                 continue;
-            }
-            let i = i.unwrap();
-            let j = j.unwrap();
+            };
+            let Some(j) = index_position(&index, edge.target) else {
+                continue;
+            };
             let delta = positions[j] - positions[i];
             let dist_len = delta.length().max(0.01);
             let force = (dist_len * dist_len) / params.ideal_length * params.attraction;
@@ -207,7 +204,6 @@ fn index_position(index: &[(NodeId, usize)], id: NodeId) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::GraphNode;
 
     fn make_graph() -> LinkGraph {
         let mut g = LinkGraph::new();
@@ -250,7 +246,10 @@ mod tests {
     #[test]
     fn nodes_stay_within_area() {
         let graph = make_graph();
-        let params = LayoutParams { area: 400.0, ..LayoutParams::default() };
+        let params = LayoutParams {
+            area: 400.0,
+            ..LayoutParams::default()
+        };
         let layout = layout_graph(&graph, &params);
         for (_, p) in &layout.positions {
             assert!(p.x >= -200.0 && p.x <= 200.0);
@@ -263,7 +262,10 @@ mod tests {
         let mut graph = LinkGraph::new();
         let id = graph.add_node("/x.md".into(), "X".into());
         assert!(graph.set_node_position(id, Pos2::new(10.0, 20.0)));
-        assert_eq!(graph.node(id).unwrap().position, Some(Pos2::new(10.0, 20.0)));
+        assert_eq!(
+            graph.node(id).unwrap().position,
+            Some(Pos2::new(10.0, 20.0))
+        );
         // Non-existent id (removed from slotmap) returns false.
         graph.remove_node(id);
         assert!(!graph.set_node_position(id, Pos2::ZERO));

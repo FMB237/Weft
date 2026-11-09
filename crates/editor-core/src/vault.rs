@@ -1,7 +1,8 @@
-use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
+use std::path::{Path, PathBuf};
 
 /// A vault is a directory of markdown files with associated config.
+#[derive(Debug)]
 pub struct Vault {
     pub root: PathBuf,
     pub config: VaultConfig,
@@ -26,7 +27,8 @@ impl Vault {
     /// Open or create a vault at the given root path.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
-        std::fs::create_dir_all(&root).with_context(|| format!("create vault dir {:?}", root))?;
+        std::fs::create_dir_all(&root)
+            .with_context(|| format!("create vault dir {}", root.display()))?;
 
         let config_path = root.join("vault.toml");
         let config = if config_path.exists() {
@@ -55,18 +57,22 @@ impl Vault {
         Ok(files)
     }
 
-    fn walk_dir(root: &Path, dir: &Path, extensions: &[String], files: &mut Vec<PathBuf>) -> Result<()> {
+    fn walk_dir(
+        root: &Path,
+        dir: &Path,
+        extensions: &[String],
+        files: &mut Vec<PathBuf>,
+    ) -> Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
                 Self::walk_dir(root, &path, extensions, files)?;
-            } else if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if extensions.contains(&ext.to_string_lossy().to_string()) {
-                        files.push(path.strip_prefix(root).unwrap_or(&path).to_path_buf());
-                    }
-                }
+            } else if path.is_file()
+                && let Some(ext) = path.extension()
+                && extensions.contains(&ext.to_string_lossy().to_string())
+            {
+                files.push(path.strip_prefix(root).unwrap_or(&path).to_path_buf());
             }
         }
         Ok(())
@@ -75,7 +81,7 @@ impl Vault {
     /// Read a file's contents relative to the vault root.
     pub fn read(&self, path: &Path) -> Result<String> {
         let full = self.root.join(path);
-        std::fs::read_to_string(&full).with_context(|| format!("read {:?}", full))
+        std::fs::read_to_string(&full).with_context(|| format!("read {}", full.display()))
     }
 
     /// Write content to a file relative to the vault root.
@@ -84,13 +90,13 @@ impl Vault {
         if let Some(parent) = full.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&full, content).with_context(|| format!("write {:?}", full))
+        std::fs::write(&full, content).with_context(|| format!("write {}", full.display()))
     }
 
     /// Delete a file relative to the vault root.
     pub fn delete(&self, path: &Path) -> Result<()> {
         let full = self.root.join(path);
-        std::fs::remove_file(&full).with_context(|| format!("delete {:?}", full))
+        std::fs::remove_file(&full).with_context(|| format!("delete {}", full.display()))
     }
 
     /// Resolve a relative path to an absolute path within the vault.

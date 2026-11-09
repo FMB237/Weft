@@ -1,4 +1,8 @@
 //! CLI entry point.
+#![expect(
+    clippy::print_stdout,
+    reason = "CLI output is the user-facing interface"
+)]
 
 use std::path::PathBuf;
 
@@ -58,19 +62,19 @@ fn main() -> anyhow::Result<()> {
         Commands::Init { path } => {
             let vault = Vault::open(&path)?;
             vault.save_config()?;
-            println!("Initialized vault at {:?}", path);
+            println!("Initialized vault at {}", path.display());
         }
         Commands::Create { path, content } => {
             let vault = Vault::open(path.parent().unwrap_or(&std::path::PathBuf::from(".")))?;
             let content = content.unwrap_or_default();
             vault.write(&path, &content)?;
-            let _doc = Document::new(path, content);
+            let _doc = Document::new(path, &content);
             println!("Created markdown file");
         }
         Commands::Read { path } => {
             let vault = Vault::open(path.parent().unwrap_or(&std::path::PathBuf::from(".")))?;
             let content = vault.read(&path)?;
-            println!("{}", content);
+            println!("{content}");
         }
         Commands::Update { path, content } => {
             let vault = Vault::open(path.parent().unwrap_or(&std::path::PathBuf::from(".")))?;

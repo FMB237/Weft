@@ -1,7 +1,14 @@
 //! Search panel.
 
+#[derive(Debug)]
 pub struct SearchPanel {
     query: String,
+}
+
+impl Default for SearchPanel {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SearchPanel {

@@ -5,10 +5,11 @@
 
 use crate::event_bus::EventBus;
 use crate::widgets::GraphCanvas;
-use egui::Ui;
 use editor_core::graph::LinkGraph;
 use editor_core::layout_store::LayoutStore;
+use egui::Ui;
 
+#[derive(Debug)]
 pub struct GraphPanel {
     canvas: GraphCanvas,
 }
@@ -31,7 +32,9 @@ impl GraphPanel {
     ) {
         ui.heading("Graph View");
         let mut graph_mut = graph.clone();
-        let response = self.canvas.show(ui, &graph_mut, layout_store, selected_path);
+        let response = self
+            .canvas
+            .show(ui, &graph_mut, layout_store, selected_path);
         self.canvas
             .handle_input(&response, ui.ctx(), &mut graph_mut, layout_store, event_bus);
     }

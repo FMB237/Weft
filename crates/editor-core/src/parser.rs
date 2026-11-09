@@ -1,5 +1,4 @@
-use comrak::ComrakOptions;
-use pulldown_cmark::{html, Parser, Options};
+use pulldown_cmark::{Options, Parser, html};
 use std::path::Path;
 use toml_edit;
 
@@ -24,8 +23,8 @@ pub struct ParsedDocument {
 /// Extract wikilinks (`[[link]]` and `[[link|alias]]`) from markdown source.
 pub fn extract_wikilinks(content: &str) -> Vec<Wikilink> {
     let mut links = Vec::new();
-    let mut chars = content.char_indices().peekable();
-    while let Some((i, _)) = chars.next() {
+    let chars = content.char_indices().peekable();
+    for (i, _) in chars {
         if content.get(i..i + 2) == Some("[[") {
             let end = content[i + 2..].find("]]");
             if let Some(end) = end {
@@ -46,12 +45,6 @@ pub fn extract_wikilinks(content: &str) -> Vec<Wikilink> {
 pub fn parse_markdown(path: &Path, content: &str) -> ParsedDocument {
     let wikilinks = extract_wikilinks(content);
 
-    let mut comrak_opts = ComrakOptions::default();
-    comrak_opts.extension.strikethrough = true;
-    comrak_opts.extension.superscript = true;
-    comrak_opts.extension.autolink = true;
-    comrak_opts.extension.table = true;
-
     // Also produce proper HTML via pulldown-cmark for rendering.
     let mut pulldown_opts = Options::empty();
     pulldown_opts.insert(Options::ENABLE_TABLES);
@@ -70,12 +63,12 @@ pub fn parse_markdown(path: &Path, content: &str) -> ParsedDocument {
 
 pub fn parse_frontmatter(content: &str) -> crate::document::Frontmatter {
     let stripped = content.trim_start();
-    if let Some(rest) = stripped.strip_prefix("---\n") {
-        if let Some(end_idx) = rest.find("\n---\n") {
-            let fm_str = &rest[..end_idx];
-            if let Ok(fm) = toml_edit::de::from_str(fm_str) {
-                return fm;
-            }
+    if let Some(rest) = stripped.strip_prefix("---\n")
+        && let Some(end_idx) = rest.find("\n---\n")
+    {
+        let fm_str = &rest[..end_idx];
+        if let Ok(fm) = toml_edit::de::from_str(fm_str) {
+            return fm;
         }
     }
     crate::document::Frontmatter::default()
@@ -103,8 +96,14 @@ mod tests {
         assert_eq!(
             links,
             vec![
-                Wikilink { target: "Home".into(), alias: None },
-                Wikilink { target: "Other Page".into(), alias: None },
+                Wikilink {
+                    target: "Home".into(),
+                    alias: None
+                },
+                Wikilink {
+                    target: "Other Page".into(),
+                    alias: None
+                },
             ]
         );
     }
@@ -115,7 +114,10 @@ mod tests {
         let links = extract_wikilinks(content);
         assert_eq!(
             links,
-            vec![Wikilink { target: "Home".into(), alias: Some("Home Page".into()) }]
+            vec![Wikilink {
+                target: "Home".into(),
+                alias: Some("Home Page".into())
+            }]
         );
     }
 
@@ -125,7 +127,10 @@ mod tests {
         assert!(parsed.html.contains("Hello"));
         assert_eq!(
             parsed.wikilinks,
-            vec![Wikilink { target: "World".into(), alias: None }]
+            vec![Wikilink {
+                target: "World".into(),
+                alias: None
+            }]
         );
     }
 }

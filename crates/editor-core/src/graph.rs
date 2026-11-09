@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 use egui::Pos2;
 use slotmap::Key;
+use std::path::{Path, PathBuf};
 
 slotmap::new_key_type! { pub struct NodeId; }
 slotmap::new_key_type! { pub struct EdgeId; }
@@ -39,7 +39,10 @@ impl LinkGraph {
     /// Add or update a node for the given file path.
     pub fn add_node(&mut self, path: PathBuf, title: String) -> NodeId {
         if let Some(&id) = self.path_to_node.get(&path) {
-            let node = self.nodes.get_mut(id).unwrap();
+            let node = self
+                .nodes
+                .get_mut(id)
+                .expect("path map points at a live node");
             node.title = title;
             return id;
         }
@@ -49,7 +52,7 @@ impl LinkGraph {
             title,
             position: None,
         });
-        let node = self.nodes.get_mut(id).unwrap();
+        let node = self.nodes.get_mut(id).expect("node was just inserted");
         node.id = id;
         self.path_to_node.insert(path, id);
         id
@@ -83,25 +86,19 @@ impl LinkGraph {
             target,
             weight,
         });
-        let edge = self.edges.get_mut(id).unwrap();
+        let edge = self.edges.get_mut(id).expect("edge was just inserted");
         edge.id = id;
         id
     }
 
     /// Incoming edges to a node (backlinks).
     pub fn incoming_edges(&self, target: NodeId) -> Vec<&GraphEdge> {
-        self.edges
-            .values()
-            .filter(|e| e.target == target)
-            .collect()
+        self.edges.values().filter(|e| e.target == target).collect()
     }
 
     /// Outgoing edges from a node (forward links).
     pub fn outgoing_edges(&self, source: NodeId) -> Vec<&GraphEdge> {
-        self.edges
-            .values()
-            .filter(|e| e.source == source)
-            .collect()
+        self.edges.values().filter(|e| e.source == source).collect()
     }
 
     /// Number of nodes.
@@ -118,7 +115,11 @@ impl LinkGraph {
     pub fn compute_backlinks(&self, target: NodeId) -> Vec<(PathBuf, String)> {
         self.incoming_edges(target)
             .iter()
-            .filter_map(|e| self.nodes.get(e.source).map(|n| (n.path.clone(), n.title.clone())))
+            .filter_map(|e| {
+                self.nodes
+                    .get(e.source)
+                    .map(|n| (n.path.clone(), n.title.clone()))
+            })
             .collect()
     }
 
@@ -179,7 +180,7 @@ impl LinkGraph {
     pub fn update_node_path(&mut self, id: NodeId, path: PathBuf) -> bool {
         if let Some(node) = self.nodes.get_mut(id) {
             self.path_to_node.remove(&node.path);
-            node.path = path.clone();
+            node.path.clone_from(&path);
             self.path_to_node.insert(path, id);
             true
         } else {

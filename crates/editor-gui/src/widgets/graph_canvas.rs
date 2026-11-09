@@ -6,13 +6,11 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use egui::{
-    Align2, Color32, FontId, FontFamily, Pos2, Response, Sense, Stroke, Vec2,
-};
 use crate::event_bus::{Event, EventBus};
 use editor_core::graph::{LinkGraph, NodeId};
-use editor_core::layout::{layout_graph, LayoutParams};
+use editor_core::layout::{LayoutParams, layout_graph};
 use editor_core::layout_store::LayoutStore;
+use egui::{Align2, Color32, FontFamily, FontId, Pos2, Response, Sense, Stroke, Vec2};
 
 /// Radius of each node circle.
 const NODE_RADIUS: f32 = 16.0;
@@ -69,10 +67,7 @@ impl GraphCanvas {
 
     /// Map a graph-space position to screen space.
     fn to_screen(&self, p: Pos2) -> Pos2 {
-        Pos2::new(
-            self.pan.x + p.x * self.zoom,
-            self.pan.y + p.y * self.zoom,
-        )
+        Pos2::new(self.pan.x + p.x * self.zoom, self.pan.y + p.y * self.zoom)
     }
 
     /// Map a screen-space position to graph space.
@@ -86,13 +81,10 @@ impl GraphCanvas {
     /// Resolve the graph-space position of a node, preferring the stored
     /// position (from [`LayoutStore`] / drags) over the layout position.
     fn node_graph_pos(
-        &self,
         node: &editor_core::graph::GraphNode,
         layout_store: &LayoutStore,
     ) -> Option<Pos2> {
-        layout_store
-            .position(&node.path)
-            .or(node.position)
+        layout_store.position(&node.path).or(node.position)
     }
 
     /// Ensure the cached layout is up to date with the current graph.
@@ -126,8 +118,10 @@ impl GraphCanvas {
         self.ensure_layout(graph);
 
         // Center the graph in the viewport on first show.
-        if !self.centered && graph.node_count() > 0 {
-            let positions = self.layout.as_ref().unwrap();
+        if !self.centered
+            && graph.node_count() > 0
+            && let Some(positions) = self.layout.as_ref()
+        {
             let mut min_x = f32::INFINITY;
             let mut min_y = f32::INFINITY;
             let mut max_x = f32::NEG_INFINITY;
@@ -138,10 +132,7 @@ impl GraphCanvas {
                 max_x = max_x.max(pos.x);
                 max_y = max_y.max(pos.y);
             }
-            let graph_center = Pos2::new(
-                (min_x + max_x) * 0.5,
-                (min_y + max_y) * 0.5,
-            );
+            let graph_center = Pos2::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);
             let screen_center = rect.center();
             self.pan = screen_center - graph_center * self.zoom;
             self.centered = true;
@@ -158,30 +149,21 @@ impl GraphCanvas {
         for edge in graph.edges() {
             let src_node = graph.node(edge.source);
             let tgt_node = graph.node(edge.target);
-            match (src_node, tgt_node) {
-                (Some(src), Some(tgt)) => {
-                    let sp = self.node_graph_pos(src, layout_store).unwrap_or_else(|| {
-                        *pos_map.get(&edge.source).unwrap_or(&Pos2::ZERO)
-                    });
-                    let tp = self.node_graph_pos(tgt, layout_store).unwrap_or_else(|| {
-                        *pos_map.get(&edge.target).unwrap_or(&Pos2::ZERO)
-                    });
-                    painter.line_segment(
-                        [self.to_screen(sp), self.to_screen(tp)],
-                        EDGE_STROKE,
-                    );
-                }
-                _ => {}
+            if let (Some(src), Some(tgt)) = (src_node, tgt_node) {
+                let sp = Self::node_graph_pos(src, layout_store)
+                    .unwrap_or_else(|| *pos_map.get(&edge.source).unwrap_or(&Pos2::ZERO));
+                let tp = Self::node_graph_pos(tgt, layout_store)
+                    .unwrap_or_else(|| *pos_map.get(&edge.target).unwrap_or(&Pos2::ZERO));
+                painter.line_segment([self.to_screen(sp), self.to_screen(tp)], EDGE_STROKE);
             }
         }
 
         // Draw nodes.
         for node_id in graph.node_ids() {
-            let node = match graph.node(node_id) {
-                Some(n) => n,
-                None => continue,
+            let Some(node) = graph.node(node_id) else {
+                continue;
             };
-            let screen_pos = match self.node_graph_pos(node, layout_store) {
+            let screen_pos = match Self::node_graph_pos(node, layout_store) {
                 Some(p) => self.to_screen(p),
                 None => continue,
             };
@@ -195,17 +177,17 @@ impl GraphCanvas {
             painter.circle_stroke(screen_pos, NODE_RADIUS, NODE_STROKE);
             // Highlight the node for the currently open document so the graph
             // stays in sync with the editor (Phase 6.1 cross-panel sync).
-            if let Some(path) = selected_path {
-                if node.path == path {
-                    painter.circle_stroke(
-                        screen_pos,
-                        NODE_RADIUS + OPEN_DOC_STROKE_WIDTH,
-                        Stroke {
-                            width: OPEN_DOC_STROKE_WIDTH,
-                            color: OPEN_DOC_STROKE_COLOR,
-                        },
-                    );
-                }
+            if let Some(path) = selected_path
+                && node.path == path
+            {
+                painter.circle_stroke(
+                    screen_pos,
+                    NODE_RADIUS + OPEN_DOC_STROKE_WIDTH,
+                    Stroke {
+                        width: OPEN_DOC_STROKE_WIDTH,
+                        color: OPEN_DOC_STROKE_COLOR,
+                    },
+                );
             }
             painter.text(
                 screen_pos,
@@ -253,50 +235,41 @@ impl GraphCanvas {
         }
 
         // Select a node on click.
-        if response.clicked() {
-            if let Some(cursor) = response.interact_pointer_pos() {
-                let selection = graph
-                    .node_ids()
-                    .iter()
-                    .copied()
-                    .find_map(|id| {
-                        let node = graph.node(id)?;
-                        let pos = self.node_graph_pos(node, layout_store)?;
-                        let screen = self.to_screen(pos);
-                        if (screen - cursor).length() <= NODE_RADIUS {
-                            Some(id)
-                        } else {
-                            None
-                        }
-                    });
-                if let Some(id) = selection {
-                    self.selected = Some(id);
-                    if let Some(node) = graph.node(id) {
-                        event_bus.publish(Event::NodeSelected(node.path.clone()));
-                    }
+        if response.clicked()
+            && let Some(cursor) = response.interact_pointer_pos()
+        {
+            let selection = graph.node_ids().iter().copied().find_map(|id| {
+                let node = graph.node(id)?;
+                let pos = Self::node_graph_pos(node, layout_store)?;
+                let screen = self.to_screen(pos);
+                if (screen - cursor).length() <= NODE_RADIUS {
+                    Some(id)
+                } else {
+                    None
+                }
+            });
+            if let Some(id) = selection {
+                self.selected = Some(id);
+                if let Some(node) = graph.node(id) {
+                    event_bus.publish(Event::NodeSelected(node.path.clone()));
                 }
             }
         }
 
         // Drag the selected node with the left mouse button.
-        if let Some(selected) = self.selected {
-            if response.dragged_by(egui::PointerButton::Primary) {
-                let node = match graph.node(selected) {
-                    Some(n) => n.clone(),
-                    None => {
-                        self.selected = None;
-                        return;
-                    }
-                };
-                let screen_pos = self
-                    .node_graph_pos(&node, layout_store)
-                    .map(|p| self.to_screen(p));
-                if let Some(screen_pos) = screen_pos {
-                    let new_screen = screen_pos + response.drag_delta();
-                    let new_graph = self.to_graph(new_screen);
-                    graph.set_node_position(selected, new_graph);
-                    layout_store.set_position(node.path, new_graph);
-                }
+        if let Some(selected) = self.selected
+            && response.dragged_by(egui::PointerButton::Primary)
+        {
+            let Some(node) = graph.node(selected).cloned() else {
+                self.selected = None;
+                return;
+            };
+            let screen_pos = Self::node_graph_pos(&node, layout_store).map(|p| self.to_screen(p));
+            if let Some(screen_pos) = screen_pos {
+                let new_screen = screen_pos + response.drag_delta();
+                let new_graph = self.to_graph(new_screen);
+                graph.set_node_position(selected, new_graph);
+                layout_store.set_position(node.path, new_graph);
             }
         }
     }

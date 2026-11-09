@@ -7,6 +7,7 @@ use crate::widgets::syntax_highlight::SyntaxHighlighter;
 use egui::{Id, TextEdit, Ui};
 use std::path::PathBuf;
 
+#[derive(Debug)]
 pub struct MarkdownEditor {
     /// Stable egui id for the text edit widget, so state persists across frames.
     id: Id,
@@ -51,7 +52,11 @@ impl MarkdownEditor {
     }
 
     /// Apply syntax highlighting to a single line (placeholder implementation).
-    pub fn highlight_line<'a>(&self, line: &'a str, highlighter: &'a SyntaxHighlighter) -> Vec<(egui::TextFormat, &'a str)> {
+    pub fn highlight_line<'a>(
+        &self,
+        line: &'a str,
+        highlighter: &'a SyntaxHighlighter,
+    ) -> Vec<(egui::TextFormat, &'a str)> {
         highlighter.highlight(line)
     }
 }

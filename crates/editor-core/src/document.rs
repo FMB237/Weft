@@ -35,14 +35,14 @@ pub struct DocumentMetadata {
 }
 
 impl Document {
-    pub fn new(path: PathBuf, content: String) -> Self {
-        let (frontmatter, body) = parse_frontmatter(&content);
+    pub fn new(path: PathBuf, content: &str) -> Self {
+        let (frontmatter, body) = parse_frontmatter(content);
         let word_count = body.split_whitespace().count();
         let now = chrono::Utc::now().to_rfc3339();
 
         Self {
             path,
-            content: body.clone(),
+            content: body,
             frontmatter,
             metadata: DocumentMetadata {
                 created_at: Some(now.clone()),
@@ -53,23 +53,20 @@ impl Document {
     }
 
     pub fn title(&self) -> String {
-        self.frontmatter
-            .title
-            .clone()
-            .unwrap_or_else(|| {
-                self.path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("untitled")
-                    .to_string()
-            })
+        self.frontmatter.title.clone().unwrap_or_else(|| {
+            self.path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("untitled")
+                .to_string()
+        })
     }
 
-    pub fn set_content(&mut self, content: String) {
-        let (frontmatter, body) = parse_frontmatter(&content);
+    pub fn set_content(&mut self, content: &str) {
+        let (frontmatter, body) = parse_frontmatter(content);
         let word_count = body.split_whitespace().count();
         self.frontmatter = frontmatter;
-        self.content = body.clone();
+        self.content = body;
         self.metadata.modified_at = Some(chrono::Utc::now().to_rfc3339());
         self.metadata.word_count = word_count;
     }
@@ -92,13 +89,13 @@ impl Document {
 /// Split frontmatter and body from raw markdown content.
 fn parse_frontmatter(content: &str) -> (Frontmatter, String) {
     let stripped = content.trim_start();
-    if let Some(rest) = stripped.strip_prefix("---\n") {
-        if let Some(end_idx) = rest.find("\n---\n") {
-            let fm_str = &rest[..end_idx];
-            let body = &rest[end_idx + 5..];
-            let fm: Frontmatter = toml_edit::de::from_str(fm_str).unwrap_or_default();
-            return (fm, body.to_string());
-        }
+    if let Some(rest) = stripped.strip_prefix("---\n")
+        && let Some(end_idx) = rest.find("\n---\n")
+    {
+        let fm_str = &rest[..end_idx];
+        let body = &rest[end_idx + 5..];
+        let fm: Frontmatter = toml_edit::de::from_str(fm_str).unwrap_or_default();
+        return (fm, body.to_string());
     }
     (Frontmatter::default(), content.to_string())
 }
@@ -118,7 +115,7 @@ mod tests {
 
     #[test]
     fn document_title_fallback() {
-        let doc = Document::new(PathBuf::from("/vault/note.md"), "# Hello".into());
+        let doc = Document::new(PathBuf::from("/vault/note.md"), "# Hello");
         assert_eq!(doc.title(), "note");
     }
 
@@ -126,7 +123,7 @@ mod tests {
     fn document_title_frontmatter() {
         let doc = Document::new(
             PathBuf::from("/vault/x.md"),
-            "---\ntitle = \"Custom\"\n---\n\n# Body".into(),
+            "---\ntitle = \"Custom\"\n---\n\n# Body",
         );
         assert_eq!(doc.title(), "Custom");
     }

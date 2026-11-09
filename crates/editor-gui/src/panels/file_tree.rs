@@ -12,6 +12,7 @@ use egui::{Id, ScrollArea, Ui, Vec2};
 /// Height of a single file-tree row in points.
 const ITEM_HEIGHT: f32 = 20.0;
 
+#[derive(Debug)]
 pub struct FileTreePanel {
     selected: Option<String>,
     /// Persisted vertical scroll offset between frames.
@@ -61,12 +62,22 @@ impl FileTreePanel {
         let viewport_height = ui.available_height();
         let total_height = ITEM_HEIGHT * files.len() as f32;
 
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "scroll offsets are non-negative screen coordinates"
+        )]
         let visible_start = (prev_offset / ITEM_HEIGHT).floor() as usize;
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "scroll offsets are non-negative screen coordinates"
+        )]
         let mut visible_end = ((prev_offset + viewport_height) / ITEM_HEIGHT).ceil() as usize + 1;
         visible_end = visible_end.min(files.len()).max(visible_start);
 
         let output = ScrollArea::vertical()
-            .id_source(id)
+            .id_salt(id)
             .min_scrolled_height(total_height)
             .show(ui, |ui| {
                 // Reserve space for rows above the visible window.
@@ -75,8 +86,7 @@ impl FileTreePanel {
                 }
 
                 let inner_width = ui.available_width();
-                for i in visible_start..visible_end {
-                    let file = &files[i];
+                for file in files.iter().take(visible_end).skip(visible_start) {
                     let name = file.to_string_lossy();
                     let selected = self.selected.as_deref() == Some(name.as_ref());
 
@@ -121,7 +131,17 @@ mod tests {
         let files_len = 100;
         let offset = 500.0;
         let viewport = 200.0;
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "scroll offsets are non-negative screen coordinates"
+        )]
         let start = (offset / ITEM_HEIGHT).floor() as usize;
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "scroll offsets are non-negative screen coordinates"
+        )]
         let mut end = ((offset + viewport) / ITEM_HEIGHT).ceil() as usize + 1;
         end = end.min(files_len).max(start);
         assert!(start < files_len);

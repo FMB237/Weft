@@ -2,10 +2,11 @@
 //!
 //! Renders the currently open document as formatted markdown.
 
-use std::path::PathBuf;
-use egui::Ui;
 use editor_core::parser::markdown_to_html;
+use egui::Ui;
+use std::path::PathBuf;
 
+#[derive(Debug)]
 pub struct PreviewPanel;
 
 impl PreviewPanel {
@@ -17,23 +18,29 @@ impl PreviewPanel {
     pub fn show(&mut self, ui: &mut Ui, open_document: &Option<PathBuf>, document_content: &str) {
         ui.heading("Preview");
 
-        if open_document.is_none() {
+        let Some(path) = open_document.as_ref() else {
             ui.label("No document open.");
             ui.separator();
             ui.label("Select a file from the sidebar to view its preview.");
             return;
-        }
+        };
 
-        ui.heading(&format!("{} - Preview", open_document.as_ref().unwrap().file_name().unwrap().to_string_lossy()));
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("untitled");
+        ui.heading(format!("{name} - Preview"));
         ui.separator();
 
         // Render markdown as HTML.
-        let html = markdown_to_html(document_content);
-        ui.add(egui::TextEdit::multiline(&mut String::from(html))
-            .id_source("preview_markdown")
-            .desired_width(f32::INFINITY)
-            .desired_rows(20)
-            .frame(false));
+        let mut html = markdown_to_html(document_content);
+        ui.add(
+            egui::TextEdit::multiline(&mut html)
+                .id_salt("preview_markdown")
+                .desired_width(f32::INFINITY)
+                .desired_rows(20)
+                .frame(false),
+        );
     }
 }
 

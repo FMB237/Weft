@@ -5,13 +5,13 @@
 
 use std::path::PathBuf;
 
-use crate::widgets::{MarkdownEditor, SyntaxHighlighter};
 use crate::panels::preview::PreviewPanel;
+use crate::widgets::MarkdownEditor;
 use egui::Ui;
 
+#[derive(Debug)]
 pub struct EditorSplitPanel {
     editor: MarkdownEditor,
-    highlighter: SyntaxHighlighter,
     preview: PreviewPanel,
     /// Split ratio between editor and preview (0.0 = all editor, 1.0 = all preview).
     pub split_ratio: f32,
@@ -21,7 +21,6 @@ impl EditorSplitPanel {
     pub fn new() -> Self {
         Self {
             editor: MarkdownEditor::new(),
-            highlighter: SyntaxHighlighter::new(),
             preview: PreviewPanel::new(),
             split_ratio: 0.5,
         }
@@ -41,17 +40,13 @@ impl EditorSplitPanel {
         ui.columns(2, |columns| {
             // Left column: Editor.
             columns[0].heading("Editor");
-            self.editor.show(
-                &mut columns[0],
-                open_document,
-                document_content,
-                dirty,
-                ctx,
-            );
+            self.editor
+                .show(&mut columns[0], open_document, document_content, dirty, ctx);
 
             // Right column: Preview.
             columns[1].heading("Preview");
-            self.preview.show(&mut columns[1], open_document, document_content);
+            self.preview
+                .show(&mut columns[1], open_document, document_content);
         });
 
         self.split_ratio = *split_ratio;

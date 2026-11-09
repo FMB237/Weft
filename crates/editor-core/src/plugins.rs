@@ -1,8 +1,8 @@
 //! Basic plugin architecture.
 
+use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use anyhow::Result;
 
 #[derive(Debug, Clone)]
 pub enum PluginEvent {
@@ -13,8 +13,12 @@ pub enum PluginEvent {
 
 pub trait Plugin: std::fmt::Debug + Send + Sync {
     fn name(&self) -> &str;
-    fn on_load(&mut self, _manager: &mut PluginManager) -> Result<()> { Ok(()) }
-    fn on_event(&mut self, _event: &PluginEvent, _manager: &mut PluginManager) -> Result<()> { Ok(()) }
+    fn on_load(&mut self, _manager: &mut PluginManager) -> Result<()> {
+        Ok(())
+    }
+    fn on_event(&mut self, _event: &PluginEvent, _manager: &mut PluginManager) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -24,11 +28,13 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn register(&mut self, mut plugin: Box<dyn Plugin>) -> Result<()> {
         let name = plugin.name().to_string();
         if self.plugins.contains_key(&name) {
-            anyhow::bail!("plugin '{}' already registered", name);
+            anyhow::bail!("plugin '{name}' already registered");
         }
         plugin.on_load(self)?;
         self.plugins.insert(name.clone(), plugin);
@@ -46,8 +52,12 @@ impl PluginManager {
         }
         Ok(())
     }
-    pub fn plugin_count(&self) -> usize { self.plugins.len() }
-    pub fn plugin_names(&self) -> Vec<&str> { self.order.iter().map(|n| n.as_str()).collect() }
+    pub fn plugin_count(&self) -> usize {
+        self.plugins.len()
+    }
+    pub fn plugin_names(&self) -> Vec<&str> {
+        self.order.iter().map(std::string::String::as_str).collect()
+    }
 }
 
 #[cfg(test)]
@@ -62,15 +72,21 @@ mod tests {
 
     impl CounterPlugin {
         fn new(name: &'static str) -> Self {
-            Self { name, vault_opens: std::sync::atomic::AtomicUsize::new(0) }
+            Self {
+                name,
+                vault_opens: std::sync::atomic::AtomicUsize::new(0),
+            }
         }
     }
 
     impl Plugin for CounterPlugin {
-        fn name(&self) -> &str { self.name }
+        fn name(&self) -> &str {
+            self.name
+        }
         fn on_event(&mut self, event: &PluginEvent, _m: &mut PluginManager) -> Result<()> {
             if matches!(event, PluginEvent::VaultOpened(_)) {
-                self.vault_opens.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.vault_opens
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
             Ok(())
         }
@@ -82,7 +98,8 @@ mod tests {
         mgr.register(Box::new(CounterPlugin::new("a"))).unwrap();
         mgr.register(Box::new(CounterPlugin::new("b"))).unwrap();
         assert_eq!(mgr.plugin_count(), 2);
-        mgr.dispatch(&PluginEvent::VaultOpened(PathBuf::from("/v"))).unwrap();
+        mgr.dispatch(&PluginEvent::VaultOpened(PathBuf::from("/v")))
+            .unwrap();
         assert_eq!(mgr.plugin_names(), vec!["a", "b"]);
     }
 
@@ -93,4 +110,3 @@ mod tests {
         assert!(mgr.register(Box::new(CounterPlugin::new("dup"))).is_err());
     }
 }
-

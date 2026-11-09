@@ -41,7 +41,10 @@ impl std::fmt::Debug for EventBus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EventBus")
             .field("queue", &self.queue)
-            .field("subscribers", &format_args!("{} handlers", self.subscribers.len()))
+            .field(
+                "subscribers",
+                &format_args!("{} handlers", self.subscribers.len()),
+            )
             .finish()
     }
 }
@@ -113,7 +116,7 @@ mod tests {
     fn event_delivered_to_subscribers() {
         let mut bus = EventBus::new();
         let received = Rc::new(RefCell::new(Vec::new()));
-        let received_copy = received.clone();
+        let received_copy = Rc::clone(&received);
         bus.subscribe(move |e| {
             received_copy.borrow_mut().push(e.clone());
         });
@@ -124,7 +127,7 @@ mod tests {
         assert_eq!(received.borrow().len(), 1);
         assert!(matches!(
             received.borrow()[0].clone(),
-            Event::NodeSelected(p) if p == PathBuf::from("a.md")
+            Event::NodeSelected(p) if p.as_path() == std::path::Path::new("a.md")
         ));
     }
 
@@ -132,9 +135,9 @@ mod tests {
     fn multiple_subscribers_receive_event() {
         let mut bus = EventBus::new();
         let count1 = Rc::new(RefCell::new(0usize));
-        let count1_copy = count1.clone();
+        let count1_copy = Rc::clone(&count1);
         let count2 = Rc::new(RefCell::new(0usize));
-        let count2_copy = count2.clone();
+        let count2_copy = Rc::clone(&count2);
         bus.subscribe(move |_| *count1_copy.borrow_mut() += 1);
         bus.subscribe(move |_| *count2_copy.borrow_mut() += 1);
 
@@ -149,7 +152,7 @@ mod tests {
     fn events_queued_until_process() {
         let mut bus = EventBus::new();
         let received = Rc::new(RefCell::new(Vec::new()));
-        let received_copy = received.clone();
+        let received_copy = Rc::clone(&received);
         bus.subscribe(move |e| received_copy.borrow_mut().push(e.clone()));
 
         bus.publish(Event::VaultChanged);

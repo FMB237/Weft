@@ -8,6 +8,7 @@ use slotmap::Key;
 /// Provides neighbor lookups, reachability, shortest paths, degree-based
 /// centrality, and betweenness centrality. Holds an immutable reference to the
 /// graph so queries can run concurrently with reads but not with mutations.
+#[derive(Debug)]
 pub struct GraphQuery<'a> {
     graph: &'a LinkGraph,
 }
@@ -61,7 +62,7 @@ impl<'a> GraphQuery<'a> {
             seen.insert(e.source);
         }
         let mut out: Vec<NodeId> = seen.into_iter().collect();
-        out.sort_by_key(|n| n.data());
+        out.sort_by_key(slotmap::Key::data);
         out
     }
 
@@ -196,10 +197,12 @@ impl<'a> GraphQuery<'a> {
             while let Some(w) = stack.pop() {
                 for &v in predecessors.get(&w).unwrap_or(&Vec::new()) {
                     let d = (sigma[&v] / sigma[&w]) * (1.0 + delta[&w]);
-                    *delta.get_mut(&v).unwrap() += d;
+                    *delta.get_mut(&v).expect("node is in the delta map") += d;
                 }
                 if w != s {
-                    *betweenness.get_mut(&w).unwrap() += delta[&w];
+                    *betweenness
+                        .get_mut(&w)
+                        .expect("node is in the betweenness map") += delta[&w];
                 }
             }
         }
@@ -211,64 +214,73 @@ impl<'a> GraphQuery<'a> {
 
     /// Strongly connected components via Tarjan's algorithm.
     pub fn strongly_connected_components(&self) -> Vec<Vec<NodeId>> {
-        let node_ids: Vec<NodeId> = self.graph.node_ids();
-        let mut index_of: HashMap<NodeId, i32> = HashMap::new();
-        let mut lowlink: HashMap<NodeId, i32> = HashMap::new();
-        let mut on_stack: HashSet<NodeId> = HashSet::new();
-        let mut stack: Vec<NodeId> = Vec::new();
-        let mut components: Vec<Vec<NodeId>> = Vec::new();
-        let mut index: i32 = 0;
+        struct Tarjan<'a> {
+            graph: &'a LinkGraph,
+            index_of: HashMap<NodeId, i32>,
+            lowlink: HashMap<NodeId, i32>,
+            on_stack: HashSet<NodeId>,
+            stack: Vec<NodeId>,
+            components: Vec<Vec<NodeId>>,
+            index: i32,
+        }
 
-        fn strongconnect(
-            v: NodeId,
-            graph: &LinkGraph,
-            index_of: &mut HashMap<NodeId, i32>,
-            lowlink: &mut HashMap<NodeId, i32>,
-            on_stack: &mut HashSet<NodeId>,
-            stack: &mut Vec<NodeId>,
-            components: &mut Vec<Vec<NodeId>>,
-            index: &mut i32,
-        ) {
-            index_of.insert(v, *index);
-            lowlink.insert(v, *index);
-            *index += 1;
-            stack.push(v);
-            on_stack.insert(v);
+        impl Tarjan<'_> {
+            fn strongconnect(&mut self, v: NodeId) {
+                self.index_of.insert(v, self.index);
+                self.lowlink.insert(v, self.index);
+                self.index += 1;
+                self.stack.push(v);
+                self.on_stack.insert(v);
 
-            for e in graph.outgoing_edges(v) {
-                let w = e.target;
-                if !index_of.contains_key(&w) {
-                    strongconnect(w, graph, index_of, lowlink, on_stack, stack, components, index);
-                    lowlink.insert(v, lowlink[&v].min(lowlink[&w]));
-                } else if on_stack.contains(&w) {
-                    lowlink.insert(v, lowlink[&v].min(index_of[&w]));
-                }
-            }
-
-            if lowlink[&v] == index_of[&v] {
-                let mut component = Vec::new();
-                loop {
-                    let w = stack.pop().unwrap();
-                    on_stack.remove(&w);
-                    component.push(w);
-                    if w == v {
-                        break;
+                for e in self.graph.outgoing_edges(v) {
+                    let w = e.target;
+                    if !self.index_of.contains_key(&w) {
+                        self.strongconnect(w);
+                        let low_w = self.lowlink[&w];
+                        let low_v = self.lowlink[&v];
+                        self.lowlink.insert(v, low_v.min(low_w));
+                    } else if self.on_stack.contains(&w) {
+                        let low_v = self.lowlink[&v];
+                        self.lowlink.insert(v, low_v.min(self.index_of[&w]));
                     }
                 }
-                component.sort_by_key(|n| n.data());
-                components.push(component);
+
+                if self.lowlink[&v] == self.index_of[&v] {
+                    let mut component = Vec::new();
+                    loop {
+                        let w = self
+                            .stack
+                            .pop()
+                            .expect("stack is non-empty while unwinding");
+                        self.on_stack.remove(&w);
+                        component.push(w);
+                        if w == v {
+                            break;
+                        }
+                    }
+                    component.sort_by_key(slotmap::Key::data);
+                    self.components.push(component);
+                }
             }
         }
 
-        for &v in &node_ids {
-            if !index_of.contains_key(&v) {
-                strongconnect(
-                    v, self.graph, &mut index_of, &mut lowlink, &mut on_stack,
-                    &mut stack, &mut components, &mut index,
-                );
+        let mut tarjan = Tarjan {
+            graph: self.graph,
+            index_of: HashMap::new(),
+            lowlink: HashMap::new(),
+            on_stack: HashSet::new(),
+            stack: Vec::new(),
+            components: Vec::new(),
+            index: 0,
+        };
+
+        for v in self.graph.node_ids() {
+            if !tarjan.index_of.contains_key(&v) {
+                tarjan.strongconnect(v);
             }
         }
 
+        let mut components = tarjan.components;
         components.sort_by_key(|c| c.first().copied().unwrap_or(NodeId::null()).data());
         components
     }
@@ -276,8 +288,12 @@ impl<'a> GraphQuery<'a> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::many_single_char_names,
+        reason = "graph fixtures use a, b, c for nodes"
+    )]
+
     use super::*;
-    use crate::graph::GraphNode;
 
     fn make_graph() -> LinkGraph {
         let mut g = LinkGraph::new();
@@ -318,7 +334,7 @@ mod tests {
         let b = g.node_by_path(std::path::Path::new("/b.md")).unwrap();
         let d = g.node_by_path(std::path::Path::new("/d.md")).unwrap();
         let mut nb = q.neighbors(a);
-        nb.sort_by_key(|n| n.data());
+        nb.sort_by_key(slotmap::Key::data);
         assert_eq!(nb, vec![b, d]);
     }
 
@@ -339,7 +355,10 @@ mod tests {
         let a = g.node_by_path(std::path::Path::new("/a.md")).unwrap();
         let c = g.node_by_path(std::path::Path::new("/c.md")).unwrap();
         let path = q.shortest_path(a, c).unwrap();
-        assert_eq!(path, vec![a, g.node_by_path(std::path::Path::new("/b.md")).unwrap(), c]);
+        assert_eq!(
+            path,
+            vec![a, g.node_by_path(std::path::Path::new("/b.md")).unwrap(), c]
+        );
     }
 
     #[test]

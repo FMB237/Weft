@@ -32,6 +32,7 @@ pub enum PanelId {
 ///
 /// Holds the active panel selection, theme settings, and each panel's
 /// instance. Panel `show` methods borrow `EditorApp` mutably one at a time.
+#[derive(Debug)]
 pub struct Panels {
     /// Currently active panel.
     pub active: PanelId,
@@ -47,6 +48,12 @@ pub struct Panels {
     pub graph: GraphPanel,
     /// Search panel.
     pub search: SearchPanel,
+}
+
+impl Default for Panels {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Panels {

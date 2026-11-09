@@ -91,13 +91,10 @@ pub fn document_to_html(content: &str, title: &str) -> String {
 /// Export a single document as a standalone HTML file.
 ///
 /// Writes the HTML to `output_path`. Returns the path written.
-pub fn export_document(
-    vault: &Vault,
-    doc_path: &Path,
-    output_path: &Path,
-) -> Result<PathBuf> {
-    let content = vault.read(doc_path)
-        .with_context(|| format!("read document {:?}", doc_path))?;
+pub fn export_document(vault: &Vault, doc_path: &Path, output_path: &Path) -> Result<PathBuf> {
+    let content = vault
+        .read(doc_path)
+        .with_context(|| format!("read document {}", doc_path.display()))?;
 
     let title = doc_path
         .file_stem()
@@ -109,11 +106,11 @@ pub fn export_document(
 
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent)
-            .with_context(|| format!("create output dir {:?}", parent))?;
+            .with_context(|| format!("create output dir {}", parent.display()))?;
     }
 
     std::fs::write(output_path, &html)
-        .with_context(|| format!("write html to {:?}", output_path))?;
+        .with_context(|| format!("write html to {}", output_path.display()))?;
 
     Ok(output_path.to_path_buf())
 }
@@ -125,22 +122,22 @@ pub fn export_document(
 /// the output directory path.
 pub fn export_vault_bundle(vault: &Vault, output_dir: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(output_dir)
-        .with_context(|| format!("create output dir {:?}", output_dir))?;
+        .with_context(|| format!("create output dir {}", output_dir.display()))?;
 
-    let files = vault.list_files()
-        .with_context(|| "list vault files")?;
+    let files = vault.list_files().with_context(|| "list vault files")?;
 
     for rel in &files {
-        let content = vault.read(rel)
-            .with_context(|| format!("read file {:?}", rel))?;
+        let content = vault
+            .read(rel)
+            .with_context(|| format!("read file {}", rel.display()))?;
 
         let dest = output_dir.join(rel);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)
-                .with_context(|| format!("create dir {:?}", parent))?;
+                .with_context(|| format!("create dir {}", parent.display()))?;
         }
         std::fs::write(&dest, content)
-            .with_context(|| format!("write bundle file {:?}", dest))?;
+            .with_context(|| format!("write bundle file {}", dest.display()))?;
     }
 
     // Also copy the vault config if present.
@@ -148,7 +145,7 @@ pub fn export_vault_bundle(vault: &Vault, output_dir: &Path) -> Result<PathBuf> 
     if config_path.exists() {
         let dest = output_dir.join("vault.toml");
         std::fs::copy(&config_path, &dest)
-            .with_context(|| format!("copy vault config to {:?}", dest))?;
+            .with_context(|| format!("copy vault config to {}", dest.display()))?;
     }
 
     Ok(output_dir.to_path_buf())
@@ -157,7 +154,6 @@ pub fn export_vault_bundle(vault: &Vault, output_dir: &Path) -> Result<PathBuf> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn document_to_html_contains_content() {
@@ -195,6 +191,9 @@ mod tests {
         assert!(out.join("a.md").exists());
         assert!(out.join("sub/b.md").exists());
         assert_eq!(std::fs::read_to_string(out.join("a.md")).unwrap(), "# a");
-        assert_eq!(std::fs::read_to_string(out.join("sub/b.md")).unwrap(), "# b");
+        assert_eq!(
+            std::fs::read_to_string(out.join("sub/b.md")).unwrap(),
+            "# b"
+        );
     }
 }

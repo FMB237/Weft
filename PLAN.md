@@ -179,17 +179,17 @@ migrate mid-feature.
 
 Goal: a clean baseline to build on.
 
-- [ ] `git init` and commit the current state untouched.
-- [ ] Add `.gitignore` (`/target`, `*.layout.json`, OS/editor files).
-- [ ] Fix `Settings::default`: `font_size = 15.0`,
+- [x] `git init` and commit the current state untouched.
+- [x] Add `.gitignore` (`/target`, `*.layout.json`, OS/editor files).
+- [x] Fix `Settings::default`: `font_size = 15.0`,
       `auto_save_interval_secs = 0`; failing test goes green.
-- [ ] Remove dead code and dependencies:
-  - [ ] delete `crates/editor-gui/src/panels/editor.rs` (not a module)
-  - [ ] remove `petgraph`, `uuid`, `walkdir`, `ignore`, `parking_lot`
-  - [ ] either call or remove the unused `comrak` block in `parser.rs`
-- [ ] Reduce warnings to zero (or explicitly allow `missing_docs` in GUI).
-- [ ] Rewrite `README.md` and `PLAN.md` to match reality.
-- [ ] Add `.github/workflows/ci.yml`: `fmt --check`, `clippy`, `test`.
+- [x] Remove dead code and dependencies:
+  - [x] delete `crates/editor-gui/src/panels/editor.rs` (not a module)
+  - [x] remove `petgraph`, `uuid`, `walkdir`, `ignore`, `parking_lot`
+  - [x] either call or remove the unused `comrak` block in `parser.rs`
+- [x] Reduce warnings to zero (or explicitly allow `missing_docs` in GUI).
+- [x] Rewrite `README.md` and `PLAN.md` to match reality.
+- [x] Add `.github/workflows/ci.yml`: `fmt --check`, `clippy`, `test`.
 
 **Done when:** `cargo test --workspace` is green, `cargo clippy` has no
 errors, and the repo has a first commit.

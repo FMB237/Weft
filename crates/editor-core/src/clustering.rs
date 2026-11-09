@@ -49,11 +49,8 @@ pub fn cluster_graph(graph: &LinkGraph) -> Vec<Cluster> {
         .enumerate()
         .map(|(i, &id)| (id, i))
         .collect();
-    index.sort_by(|a, b| a.0.data().cmp(&b.0.data()));
-    let pos: HashMap<NodeId, usize> = index
-        .iter()
-        .map(|(id, i)| (*id, *i))
-        .collect();
+    index.sort_by_key(|a| a.0.data());
+    let pos: HashMap<NodeId, usize> = index.iter().map(|(id, i)| (*id, *i)).collect();
 
     // Undirected adjacency by index.
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
@@ -88,8 +85,7 @@ pub fn cluster_graph(graph: &LinkGraph) -> Vec<Cluster> {
             let best = counts
                 .into_iter()
                 .max_by_key(|pair| (pair.1, usize::MAX - pair.0))
-                .map(|(label, _)| label)
-                .unwrap_or(current);
+                .map_or(current, |(label, _)| label);
 
             if best != current {
                 labels[i] = best;
@@ -111,7 +107,7 @@ pub fn cluster_graph(graph: &LinkGraph) -> Vec<Cluster> {
             nodes.sort_by(|a, b| {
                 pos.get(a)
                     .unwrap_or(&usize::MAX)
-                    .cmp(&pos.get(b).unwrap_or(&usize::MAX))
+                    .cmp(pos.get(b).unwrap_or(&usize::MAX))
             });
             Cluster { id, nodes }
         })
@@ -123,8 +119,12 @@ pub fn cluster_graph(graph: &LinkGraph) -> Vec<Cluster> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::many_single_char_names,
+        reason = "graph fixtures use a, b, c for nodes"
+    )]
+
     use super::*;
-    use crate::graph::GraphNode;
 
     fn make_graph() -> LinkGraph {
         let mut g = LinkGraph::new();
@@ -146,7 +146,7 @@ mod tests {
     fn cluster_graph_returns_all_nodes() {
         let graph = make_graph();
         let clusters = cluster_graph(&graph);
-        let total: usize = clusters.iter().map(|c| c.len()).sum();
+        let total: usize = clusters.iter().map(super::Cluster::len).sum();
         assert_eq!(total, graph.node_count());
     }
 
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn cluster_graph_len_and_is_empty() {
         let mut graph = LinkGraph::new();
-        let id = graph.add_node("/x.md".into(), "X".into());
+        let _id = graph.add_node("/x.md".into(), "X".into());
         let clusters = cluster_graph(&graph);
         assert!(!clusters[0].is_empty());
         assert_eq!(clusters[0].len(), 1);

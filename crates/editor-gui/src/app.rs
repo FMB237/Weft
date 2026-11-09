@@ -6,18 +6,18 @@
 
 use std::path::{Path, PathBuf};
 
-use editor_core::vault::{Vault};
 use editor_core::document::Document;
+use editor_core::export::{export_document, export_vault_bundle};
 use editor_core::graph::LinkGraph;
 use editor_core::layout_store::LayoutStore;
-use editor_core::export::{export_document, export_vault_bundle};
 use editor_core::parser::parse_frontmatter;
+use editor_core::vault::Vault;
 
-use egui::{CentralPanel, Key, Modifiers, SidePanel, TopBottomPanel, Slider, DragValue};
 use eframe::Storage;
+use egui::{CentralPanel, Key, SidePanel, TopBottomPanel};
 
 use crate::event_bus::{Event, EventBus};
-use crate::panels::{Panels, PanelId};
+use crate::panels::{PanelId, Panels};
 use crate::settings::{Settings, SettingsPanel};
 use crate::theme::Theme;
 use editor_core::plugins::{PluginEvent, PluginManager};
@@ -39,9 +39,10 @@ impl AppState {
     const STORAGE_KEY: &'static str = "editor_app_state";
 
     pub fn load(storage: Option<&dyn Storage>) -> Self {
-        storage.and_then(|s| s.get_string(Self::STORAGE_KEY)).and_then(|s| {
-            serde_json::from_str::<AppState>(&s).ok()
-        }).unwrap_or_default()
+        storage
+            .and_then(|s| s.get_string(Self::STORAGE_KEY))
+            .and_then(|s| serde_json::from_str::<AppState>(&s).ok())
+            .unwrap_or_default()
     }
 
     pub fn save(&self, storage: &mut dyn Storage) {
@@ -52,6 +53,10 @@ impl AppState {
 }
 
 /// The main editor application.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "UI flags are independent toggles, not a single state enum"
+)]
 pub struct EditorApp {
     /// Persisted app state.
     pub(crate) state: AppState,
@@ -97,6 +102,16 @@ pub struct EditorApp {
     pub(crate) command_palette_input: String,
 }
 
+impl std::fmt::Debug for EditorApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EditorApp")
+            .field("vault", &self.vault)
+            .field("open_document", &self.open_document)
+            .field("dirty", &self.dirty)
+            .finish_non_exhaustive()
+    }
+}
+
 impl EditorApp {
     /// Create a new app instance, loading persisted state from storage.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -137,10 +152,12 @@ impl EditorApp {
                 self.state.vault_path = Some(path.to_path_buf());
                 self.vault = Some(vault);
                 self.rebuild_graph();
-                let _ = self.plugins.dispatch(&PluginEvent::VaultOpened(path.to_path_buf()));
+                let _ = self
+                    .plugins
+                    .dispatch(&PluginEvent::VaultOpened(path.to_path_buf()));
             }
             Err(e) => {
-                eprintln!("Failed to open vault at {:?}: {}", path, e);
+                eprintln!("Failed to open vault at {}: {e}", path.display());
             }
         }
     }
@@ -148,21 +165,20 @@ impl EditorApp {
     /// Rebuild the link graph from the current vault's files.
     pub(crate) fn rebuild_graph(&mut self) {
         let Some(vault) = &self.vault else { return };
-        let Ok(files) = vault.list_files() else { return };
+        let Ok(files) = vault.list_files() else {
+            return;
+        };
 
         self.graph = LinkGraph::new();
         for file in &files {
             if let Ok(content) = vault.read(file) {
                 let frontmatter = parse_frontmatter(&content);
-                let title = frontmatter
-                    .title
-                    .clone()
-                    .unwrap_or_else(|| {
-                        file.file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("untitled")
-                            .to_string()
-                    });
+                let title = frontmatter.title.clone().unwrap_or_else(|| {
+                    file.file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("untitled")
+                        .to_string()
+                });
                 self.graph.add_node(file.clone(), title);
             }
         }
@@ -172,17 +188,19 @@ impl EditorApp {
     }
 
     /// Open a document for editing.
-    pub(crate) fn open_document(&mut self, path: PathBuf) {
+    pub(crate) fn open_document(&mut self, path: &Path) {
         let Some(vault) = &self.vault else { return };
-        match vault.read(&path) {
+        match vault.read(path) {
             Ok(content) => {
-                self.open_document = Some(path.clone());
+                self.open_document = Some(path.to_path_buf());
                 self.document_content = content;
                 self.dirty = false;
-                let _ = self.plugins.dispatch(&PluginEvent::DocumentOpened(path.clone()));
+                let _ = self
+                    .plugins
+                    .dispatch(&PluginEvent::DocumentOpened(path.to_path_buf()));
             }
             Err(e) => {
-                eprintln!("Failed to read document {:?}: {}", path, e);
+                eprintln!("Failed to read document {}: {e}", path.display());
             }
         }
     }
@@ -190,10 +208,11 @@ impl EditorApp {
     /// Save the current document to the vault.
     pub(crate) fn save_document(&mut self) {
         let Some(vault) = &mut self.vault else { return };
-        let Some(path) = &self.open_document else { return };
+        let Some(path) = &self.open_document else {
+            return;
+        };
 
-        let doc = Document::new(path.clone(), self.document_content.clone());
-        let content = doc.content.clone();
+        let doc = Document::new(path.clone(), &self.document_content);
         // Re-attach frontmatter if present.
         let full_content = if doc.frontmatter.title.is_some() || !doc.frontmatter.tags.is_empty() {
             // Simple round-trip: serialize frontmatter back.
@@ -210,7 +229,9 @@ impl EditorApp {
         if vault.write(path, &full_content).is_ok() {
             self.dirty = false;
             self.event_bus.publish(Event::DocumentSaved(path.clone()));
-            let _ = self.plugins.dispatch(&PluginEvent::DocumentSaved(path.clone()));
+            let _ = self
+                .plugins
+                .dispatch(&PluginEvent::DocumentSaved(path.clone()));
             self.rebuild_graph();
         }
     }
@@ -235,21 +256,15 @@ impl EditorApp {
     pub(crate) fn process_events(&mut self, ctx: &egui::Context) {
         for event in self.event_bus.drain() {
             match event {
-                Event::NodeSelected(path) => {
-                    self.open_document = Some(path);
+                Event::NodeSelected(path) | Event::NodeOpened(path) => {
+                    self.open_document(&path);
                 }
-                Event::NodeOpened(path) => {
-                    self.open_document = Some(path);
-                }
-                Event::GraphChanged => {
+                Event::GraphChanged | Event::VaultChanged => {
                     self.rebuild_graph();
                 }
                 Event::DocumentSaved(_path) => {
                     // Document already saved by the panel; mark not dirty.
                     self.dirty = false;
-                }
-                Event::VaultChanged => {
-                    self.rebuild_graph();
                 }
                 Event::ThemeChanged => {
                     ctx.set_visuals(self.state.theme.visuals());
@@ -260,7 +275,7 @@ impl EditorApp {
 
     /// Handle global keyboard shortcuts.
     pub(crate) fn handle_keyboard(&mut self, ctx: &egui::Context) {
-        let input = ctx.input(|i| i.clone());
+        let input = ctx.input(std::clone::Clone::clone);
         let modifiers = input.modifiers;
 
         if modifiers.mac_cmd || modifiers.ctrl {
@@ -290,17 +305,15 @@ impl EditorApp {
 
     /// Render the export dialog modal if an export is pending.
     fn render_export_dialog(&mut self, ctx: &egui::Context) {
-        let mut export = match std::mem::take(&mut self.export_state) {
-            Some(e) => e,
-            None => return,
+        let Some(export) = std::mem::take(&mut self.export_state) else {
+            return;
         };
         let doc_path = match &export {
             ExportState::Document { doc_path, .. } => Some(doc_path.clone()),
             ExportState::Vault { .. } => None,
         };
         let mut output = match &export {
-            ExportState::Document { output, .. } => output.clone(),
-            ExportState::Vault { output } => output.clone(),
+            ExportState::Document { output, .. } | ExportState::Vault { output } => output.clone(),
         };
         let vault_root = self.vault.as_ref().map(|v| v.root.clone());
         let mut do_export = false;
@@ -338,15 +351,24 @@ impl EditorApp {
         if do_cancel {
             self.export_state = None;
         } else if do_export {
+            let Some(vault) = self.vault.as_ref() else {
+                self.export_state = None;
+                return;
+            };
             let result = match doc_path {
-                Some(ref p) => export_document(self.vault.as_ref().unwrap(), p, Path::new(&output)).map(|_| ()),
-                None => export_vault_bundle(self.vault.as_ref().unwrap(), Path::new(&output)).map(|_| ()),
+                Some(ref p) => export_document(vault, p, Path::new(&output)).map(|_| ()),
+                None => export_vault_bundle(vault, Path::new(&output)).map(|_| ()),
             };
             match result {
-                Ok(()) => { self.export_state = None; }
+                Ok(()) => {
+                    self.export_state = None;
+                }
                 Err(e) => {
                     self.export_state = Some(match doc_path {
-                        Some(p) => ExportState::Document { doc_path: p, output },
+                        Some(p) => ExportState::Document {
+                            doc_path: p,
+                            output,
+                        },
                         None => ExportState::Vault { output },
                     });
                     eprintln!("Export failed: {e}");
@@ -355,7 +377,10 @@ impl EditorApp {
         } else {
             // Window closed or reshow: keep the dialog open with any edits.
             self.export_state = Some(match doc_path {
-                Some(p) => ExportState::Document { doc_path: p, output },
+                Some(p) => ExportState::Document {
+                    doc_path: p,
+                    output,
+                },
                 None => ExportState::Vault { output },
             });
         }
@@ -400,8 +425,7 @@ impl EditorApp {
                             open_path = Some(path);
                         }
                     }
-                    if ui.button("Cancel").clicked() {
-                    }
+                    if ui.button("Cancel").clicked() {}
                 });
             });
 
@@ -459,7 +483,7 @@ impl EditorApp {
 }
 
 impl eframe::App for EditorApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Keyboard shortcuts (handled before panels so they take priority).
         self.handle_keyboard(ctx);
 
@@ -489,7 +513,9 @@ impl eframe::App for EditorApp {
                             ui.close_menu();
                         }
                         if ui.button("Export Vault Bundle...").clicked() {
-                            self.export_state = Some(ExportState::Vault { output: String::new() });
+                            self.export_state = Some(ExportState::Vault {
+                                output: String::new(),
+                            });
                             ui.close_menu();
                         }
                     });
@@ -520,16 +546,21 @@ impl eframe::App for EditorApp {
 
         // Left side panel: file tree.
         SidePanel::left("file_tree").show(ctx, |ui| {
-            self.panels.file_tree
+            self.panels
+                .file_tree
                 .show(ui, self.vault.as_mut(), &mut self.event_bus);
         });
 
         // Central panel: editor split or graph view depending on active panel.
         CentralPanel::default().show(ctx, |ui| {
             if self.panels.active == PanelId::Graph {
-                self.panels
-                    .graph
-                    .show(ui, &self.graph, &mut self.layout_store, &mut self.event_bus, self.open_document.as_deref());
+                self.panels.graph.show(
+                    ui,
+                    &self.graph,
+                    &mut self.layout_store,
+                    &mut self.event_bus,
+                    self.open_document.as_deref(),
+                );
             } else {
                 self.panels.editor_split.show(
                     ui,
@@ -544,7 +575,9 @@ impl eframe::App for EditorApp {
 
         // Right side panel: preview.
         SidePanel::right("preview").show(ctx, |ui| {
-            self.panels.preview.show(ui, &self.open_document, &self.document_content);
+            self.panels
+                .preview
+                .show(ui, &self.open_document, &self.document_content);
         });
 
         // Dispatch cross-panel events.

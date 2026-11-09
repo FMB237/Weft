@@ -1,9 +1,9 @@
+use notify::Watcher as NotifyWatcher;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use notify::Watcher as NotifyWatcher;
 
 /// Events emitted by the file watcher.
 #[derive(Debug, Clone)]
@@ -39,16 +39,25 @@ pub struct Watcher {
     pending: VecDeque<WatchEvent>,
 }
 
+impl std::fmt::Debug for Watcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Watcher")
+            .field("pending", &self.pending.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl Watcher {
     pub fn watch(root: &Path) -> anyhow::Result<(Self, mpsc::UnboundedSender<WatchEvent>)> {
         let (tx, rx) = mpsc::unbounded_channel();
         let tx_clone = tx.clone();
 
-        let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-            if let Ok(event) = res {
-                let _ = map_notify_event(&event, &tx_clone);
-            }
-        })?;
+        let mut watcher =
+            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+                if let Ok(event) = res {
+                    map_notify_event(&event, &tx_clone);
+                }
+            })?;
 
         watcher.watch(root, notify::RecursiveMode::Recursive)?;
 
@@ -81,7 +90,7 @@ impl Watcher {
         tokio::pin!(sleep);
         loop {
             tokio::select! {
-                _ = &mut sleep => break,
+                () = &mut sleep => break,
                 ev = self.rx.recv() => {
                     if let Some(ev) = ev {
                         self.pending.push_back(ev);
@@ -119,10 +128,7 @@ impl Watcher {
     }
 }
 
-fn map_notify_event(
-    event: &notify::Event,
-    tx: &mpsc::UnboundedSender<WatchEvent>,
-) -> anyhow::Result<()> {
+fn map_notify_event(event: &notify::Event, tx: &mpsc::UnboundedSender<WatchEvent>) {
     for path in &event.paths {
         match event.kind {
             notify::EventKind::Create(_) => {
@@ -134,11 +140,9 @@ fn map_notify_event(
             notify::EventKind::Remove(_) => {
                 let _ = tx.send(WatchEvent::Deleted(path.clone()));
             }
-            notify::EventKind::Any => {}
             _ => {}
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -148,7 +152,7 @@ mod tests {
     #[test]
     fn watch_event_debug() {
         let e = WatchEvent::Created(std::path::PathBuf::from("/a.md"));
-        assert!(format!("{:?}", e).contains("Created"));
+        assert!(format!("{e:?}").contains("Created"));
     }
 
     #[test]

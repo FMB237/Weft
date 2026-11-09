@@ -2,13 +2,17 @@
 //!
 //! These tests exercise cross-module behavior: graph + layout store,
 //! parser + graph building, vault CRUD + graph updater, etc.
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration tests panic on fixture setup failures"
+)]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use editor_core::graph::{LinkGraph, NodeId};
 use editor_core::layout_store::LayoutStore;
-use editor_core::parser::{extract_wikilinks, parse_markdown, ParsedDocument, Wikilink};
+use editor_core::parser::{ParsedDocument, Wikilink, extract_wikilinks, parse_markdown};
 use editor_core::vault::Vault;
 
 fn make_graph_with_nodes(graph: &mut LinkGraph, paths: &[&str]) -> Vec<(NodeId, PathBuf)> {
@@ -35,7 +39,9 @@ fn link_graph_add_and_lookup_nodes() {
     assert_eq!(node_a.path, PathBuf::from("a.md"));
     assert_eq!(node_a.title, "A");
 
-    let node_by_path = graph.node_by_path(PathBuf::from("b.md").as_path()).expect("node b by path");
+    let node_by_path = graph
+        .node_by_path(PathBuf::from("b.md").as_path())
+        .expect("node b by path");
     assert_eq!(node_by_path, b);
 
     let ids: Vec<NodeId> = graph.node_ids();
@@ -60,13 +66,21 @@ fn link_graph_add_and_remove_edges() {
 
     assert_eq!(graph.edge_count(), 3);
 
-    let outgoing: Vec<NodeId> = graph.outgoing_edges(a).into_iter().map(|e| e.target).collect();
+    let outgoing: Vec<NodeId> = graph
+        .outgoing_edges(a)
+        .into_iter()
+        .map(|e| e.target)
+        .collect();
     assert_eq!(outgoing.len(), 2);
     assert!(outgoing.contains(&b));
     assert!(outgoing.contains(&c));
 
     graph.remove_outgoing_edges(a);
-    let outgoing: Vec<NodeId> = graph.outgoing_edges(a).into_iter().map(|e| e.target).collect();
+    let outgoing: Vec<NodeId> = graph
+        .outgoing_edges(a)
+        .into_iter()
+        .map(|e| e.target)
+        .collect();
     assert!(outgoing.is_empty());
     // Edge b->c should still exist.
     assert_eq!(graph.edge_count(), 1);
@@ -89,7 +103,11 @@ fn link_graph_remove_node_removes_incident_edges() {
 
     assert_eq!(graph.node_count(), 2);
     assert!(graph.node(b).is_none());
-    assert!(graph.node_by_path(PathBuf::from("b.md").as_path()).is_none());
+    assert!(
+        graph
+            .node_by_path(PathBuf::from("b.md").as_path())
+            .is_none()
+    );
 
     // All edges incident to b should be gone; c->a should remain.
     assert_eq!(graph.edge_count(), 1);
@@ -121,7 +139,7 @@ fn layout_store_set_and_get_position() {
     assert!(store.position(Path::new("a.md")).is_none());
 
     store.set_position(path_a.clone(), egui::Pos2::new(10.0, 20.0));
-    store.set_position(path_b.clone(), egui::Pos2::new(30.0, 40.0));
+    store.set_position(path_b, egui::Pos2::new(30.0, 40.0));
 
     assert_eq!(
         store.position(Path::new("a.md")),
@@ -133,14 +151,26 @@ fn layout_store_set_and_get_position() {
     );
 
     let positions: Vec<(PathBuf, egui::Pos2)> = store.positions();
-    let pos_map: HashMap<&Path, egui::Pos2> = positions.iter().map(|(p, pos)| (p.as_path(), *pos)).collect();
+    let pos_map: HashMap<&Path, egui::Pos2> = positions
+        .iter()
+        .map(|(p, pos)| (p.as_path(), *pos))
+        .collect();
     assert_eq!(pos_map.len(), 2);
-    assert_eq!(pos_map.get(Path::new("a.md")), Some(&egui::Pos2::new(10.0, 20.0)));
-    assert_eq!(pos_map.get(Path::new("b.md")), Some(&egui::Pos2::new(30.0, 40.0)));
+    assert_eq!(
+        pos_map.get(Path::new("a.md")),
+        Some(&egui::Pos2::new(10.0, 20.0))
+    );
+    assert_eq!(
+        pos_map.get(Path::new("b.md")),
+        Some(&egui::Pos2::new(30.0, 40.0))
+    );
 
     store.remove_position(&path_a);
     assert!(store.position(Path::new("a.md")).is_none());
-    assert_eq!(store.position(Path::new("b.md")), Some(egui::Pos2::new(30.0, 40.0)));
+    assert_eq!(
+        store.position(Path::new("b.md")),
+        Some(egui::Pos2::new(30.0, 40.0))
+    );
 }
 
 #[test]
@@ -151,8 +181,11 @@ fn layout_store_json_round_trip() {
 
     let json = store.to_json().expect("serialize should succeed");
 
-    let mut restored = LayoutStore::from_json(json.as_str()).expect("deserialize should succeed");
-    assert_eq!(restored.position(Path::new("a.md")), Some(egui::Pos2::new(1.5, 2.5)));
+    let restored = LayoutStore::from_json(json.as_str()).expect("deserialize should succeed");
+    assert_eq!(
+        restored.position(Path::new("a.md")),
+        Some(egui::Pos2::new(1.5, 2.5))
+    );
     assert_eq!(
         restored.position(Path::new("sub/b.md")),
         Some(egui::Pos2::new(-3.0, 4.0))
@@ -171,10 +204,16 @@ fn layout_store_apply_to_graph_updates_node_positions() {
     store.apply_to_graph(&mut graph);
 
     let a = graph.node_by_path(PathBuf::from("a.md").as_path()).unwrap();
-    assert_eq!(graph.node(a).unwrap().position, Some(egui::Pos2::new(100.0, 200.0)));
+    assert_eq!(
+        graph.node(a).unwrap().position,
+        Some(egui::Pos2::new(100.0, 200.0))
+    );
 
     let b = graph.node_by_path(PathBuf::from("b.md").as_path()).unwrap();
-    assert_eq!(graph.node(b).unwrap().position, Some(egui::Pos2::new(300.0, 400.0)));
+    assert_eq!(
+        graph.node(b).unwrap().position,
+        Some(egui::Pos2::new(300.0, 400.0))
+    );
 }
 
 #[test]
@@ -199,7 +238,10 @@ fn parser_parse_markdown_returns_title_and_links() {
     let parsed: ParsedDocument = parse_markdown(Path::new("page.md"), content);
 
     assert_eq!(parsed.frontmatter.title.as_deref(), Some("My Page"));
-    assert_eq!(parsed.frontmatter.tags, vec!["rust".to_string(), "notes".to_string()]);
+    assert_eq!(
+        parsed.frontmatter.tags,
+        vec!["rust".to_string(), "notes".to_string()]
+    );
 
     let links: Vec<Wikilink> = extract_wikilinks(&parsed.html);
     assert_eq!(links.len(), 1);
@@ -214,7 +256,9 @@ fn vault_crud_round_trip() {
 
     // Write files.
     vault.write(Path::new("a.md"), "# A\n").expect("write a.md");
-    vault.write(Path::new("sub/b.md"), "# B\n").expect("write sub/b.md");
+    vault
+        .write(Path::new("sub/b.md"), "# B\n")
+        .expect("write sub/b.md");
 
     let files: Vec<PathBuf> = vault.list_files().expect("list files");
     assert!(files.iter().any(|f| f.ends_with("a.md")));
@@ -225,7 +269,9 @@ fn vault_crud_round_trip() {
     assert_eq!(content, "# A\n");
 
     // Delete one file and confirm it's gone.
-    vault.delete(Path::new("sub/b.md")).expect("delete sub/b.md");
+    vault
+        .delete(Path::new("sub/b.md"))
+        .expect("delete sub/b.md");
     let files_after: Vec<PathBuf> = vault.list_files().expect("list files again");
     assert!(!files_after.iter().any(|f| f.ends_with("sub/b.md")));
 }
@@ -236,7 +282,9 @@ fn vault_resolve_returns_full_path() {
     let vault_path = tmp.path().to_path_buf();
     let vault = Vault::open(&vault_path).expect("vault should open");
 
-    vault.write(Path::new("nested/deep.md"), "x\n").expect("write nested/deep.md");
+    vault
+        .write(Path::new("nested/deep.md"), "x\n")
+        .expect("write nested/deep.md");
 
     let resolved = vault.resolve(Path::new("nested/deep.md"));
     assert_eq!(resolved, vault_path.join("nested/deep.md"));
@@ -245,19 +293,15 @@ fn vault_resolve_returns_full_path() {
 #[test]
 fn plugin_dispatch_notifies_all_plugins() {
     use editor_core::plugins::{PluginEvent, PluginManager};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-
-    let counter_a = Arc::new(AtomicUsize::new(0));
-    let counter_b = Arc::new(AtomicUsize::new(0));
-    let counter_a_clone = Arc::clone(&counter_a);
-    let counter_b_clone = Arc::clone(&counter_b);
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Debug)]
     struct CountingPlugin {
         name: &'static str,
         counter: Arc<AtomicUsize>,
     }
+
     impl editor_core::plugins::Plugin for CountingPlugin {
         fn name(&self) -> &str {
             self.name
@@ -274,30 +318,35 @@ fn plugin_dispatch_notifies_all_plugins() {
         }
     }
 
+    let counter_a = Arc::new(AtomicUsize::new(0));
+    let counter_b = Arc::new(AtomicUsize::new(0));
+    let observed_a = Arc::clone(&counter_a);
+    let observed_b = Arc::clone(&counter_b);
+
     let mut mgr = PluginManager::new();
     mgr.register(Box::new(CountingPlugin {
         name: "first",
-        counter: counter_a.clone(),
+        counter: counter_a,
     }))
     .unwrap();
     mgr.register(Box::new(CountingPlugin {
         name: "second",
-        counter: counter_b_clone.clone(),
+        counter: counter_b,
     }))
     .unwrap();
 
     mgr.dispatch(&PluginEvent::VaultOpened(PathBuf::from("/vault")))
         .unwrap();
 
-    assert_eq!(counter_a_clone.load(Ordering::Relaxed), 1);
-    assert_eq!(counter_b_clone.load(Ordering::Relaxed), 1);
+    assert_eq!(observed_a.load(Ordering::Relaxed), 1);
+    assert_eq!(observed_b.load(Ordering::Relaxed), 1);
     assert_eq!(mgr.plugin_names(), vec!["first", "second"]);
 }
 
 #[test]
 fn plugin_graph_and_layout_cross_module() {
     use editor_core::graph::LinkGraph;
-    use editor_core::layout::{layout_graph, LayoutParams};
+    use editor_core::layout::{LayoutParams, layout_graph};
     use editor_core::layout_store::LayoutStore;
     use editor_core::plugins::{PluginEvent, PluginManager};
 

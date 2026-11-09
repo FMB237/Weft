@@ -56,9 +56,8 @@ impl Theme {
     /// Returns the egui visual style for this theme.
     pub fn visuals(&self) -> egui::Visuals {
         match self.mode {
-            ThemeMode::Dark => egui::Visuals::dark(),
+            ThemeMode::Dark | ThemeMode::System => egui::Visuals::dark(),
             ThemeMode::Light => egui::Visuals::light(),
-            ThemeMode::System => egui::Visuals::dark(),
         }
     }
 
@@ -75,18 +74,16 @@ impl Theme {
     /// Surface color for panels/cards.
     pub fn surface(&self) -> egui::Color32 {
         match self.mode {
-            ThemeMode::Dark => egui::Color32::from_rgb(17, 17, 19),
+            ThemeMode::Dark | ThemeMode::System => egui::Color32::from_rgb(17, 17, 19),
             ThemeMode::Light => egui::Color32::from_rgb(255, 255, 255),
-            ThemeMode::System => egui::Color32::from_rgb(17, 17, 19),
         }
     }
 
     /// Border color for subtle borders.
     pub fn border(&self) -> egui::Color32 {
         match self.mode {
-            ThemeMode::Dark => egui::Color32::from_rgb(39, 39, 42),
+            ThemeMode::Dark | ThemeMode::System => egui::Color32::from_rgb(39, 39, 42),
             ThemeMode::Light => egui::Color32::from_rgb(229, 231, 235),
-            ThemeMode::System => egui::Color32::from_rgb(39, 39, 42),
         }
     }
 }

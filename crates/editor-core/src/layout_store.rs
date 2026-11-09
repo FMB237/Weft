@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::graph::{LinkGraph, NodeId};
+use crate::graph::LinkGraph;
 use egui::Pos2;
 
 /// Serializes and deserializes node layout positions to/from disk.
@@ -11,7 +11,7 @@ use egui::Pos2;
 /// Paths give a stable, human-readable identifier for each node.
 ///
 /// Internally positions are stored as `[f32; 2]` arrays so they serialize
-/// with plain serde_json without requiring egui's `serde` feature.
+/// with plain `serde_json` without requiring egui's `serde` feature.
 #[derive(Debug, Clone, Default)]
 pub struct LayoutStore {
     positions: HashMap<PathBuf, [f32; 2]>,
@@ -74,14 +74,16 @@ impl LayoutStore {
 
     /// Write the store to a JSON file at `path`.
     pub fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
-        let json = self.to_json().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let json = self
+            .to_json()
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         std::fs::write(path, json)
     }
 
     /// Load a store from a JSON file at `path`.
     pub fn load_from_file(path: &Path) -> std::io::Result<Self> {
         let json = std::fs::read_to_string(path)?;
-        Self::from_json(&json).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        Self::from_json(&json).map_err(|e| std::io::Error::other(e.to_string()))
     }
 
     /// Apply all stored positions to the graph, setting `node.position` for
@@ -90,11 +92,11 @@ impl LayoutStore {
     pub fn apply_to_graph(&self, graph: &mut LinkGraph) -> usize {
         let mut applied = 0;
         for id in graph.node_ids() {
-            if let Some(node) = graph.node(id) {
-                if let Some(pos) = self.positions.get(&node.path) {
-                    graph.set_node_position(id, Pos2::new(pos[0], pos[1]));
-                    applied += 1;
-                }
+            if let Some(node) = graph.node(id)
+                && let Some(pos) = self.positions.get(&node.path)
+            {
+                graph.set_node_position(id, Pos2::new(pos[0], pos[1]));
+                applied += 1;
             }
         }
         applied
@@ -105,10 +107,10 @@ impl LayoutStore {
     pub fn capture_from_graph(&mut self, graph: &LinkGraph) {
         self.positions.clear();
         for id in graph.node_ids() {
-            if let Some(node) = graph.node(id) {
-                if let Some(pos) = node.position {
-                    self.positions.insert(node.path.clone(), [pos.x, pos.y]);
-                }
+            if let Some(node) = graph.node(id)
+                && let Some(pos) = node.position
+            {
+                self.positions.insert(node.path.clone(), [pos.x, pos.y]);
             }
         }
     }
@@ -117,7 +119,6 @@ impl LayoutStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::GraphNode;
 
     #[test]
     fn store_roundtrip_json() {
@@ -127,8 +128,14 @@ mod tests {
 
         let json = store.to_json().unwrap();
         let loaded = LayoutStore::from_json(&json).unwrap();
-        assert_eq!(loaded.position(Path::new("/a.md")), Some(Pos2::new(1.0, 2.0)));
-        assert_eq!(loaded.position(Path::new("/b.md")), Some(Pos2::new(3.0, 4.0)));
+        assert_eq!(
+            loaded.position(Path::new("/a.md")),
+            Some(Pos2::new(1.0, 2.0))
+        );
+        assert_eq!(
+            loaded.position(Path::new("/b.md")),
+            Some(Pos2::new(3.0, 4.0))
+        );
         assert_eq!(loaded.len(), 2);
     }
 
@@ -139,7 +146,10 @@ mod tests {
         let file = std::env::temp_dir().join("layout_store_test.json");
         store.save_to_file(&file).unwrap();
         let loaded = LayoutStore::load_from_file(&file).unwrap();
-        assert_eq!(loaded.position(Path::new("/a.md")), Some(Pos2::new(5.0, 6.0)));
+        assert_eq!(
+            loaded.position(Path::new("/a.md")),
+            Some(Pos2::new(5.0, 6.0))
+        );
         let _ = std::fs::remove_file(&file);
     }
 
@@ -162,14 +172,17 @@ mod tests {
     fn store_capture_from_graph() {
         let mut graph = LinkGraph::new();
         let a = graph.add_node("/a.md".into(), "A".into());
-        let b = graph.add_node("/b.md".into(), "B".into());
+        let _b = graph.add_node("/b.md".into(), "B".into());
         assert!(graph.set_node_position(a, Pos2::new(1.0, 2.0)));
         // b has no position set.
 
         let mut store = LayoutStore::new();
         store.capture_from_graph(&graph);
         assert_eq!(store.len(), 1);
-        assert_eq!(store.position(Path::new("/a.md")), Some(Pos2::new(1.0, 2.0)));
+        assert_eq!(
+            store.position(Path::new("/a.md")),
+            Some(Pos2::new(1.0, 2.0))
+        );
         assert_eq!(store.position(Path::new("/b.md")), None);
     }
 
@@ -187,7 +200,10 @@ mod tests {
     fn store_remove_position() {
         let mut store = LayoutStore::new();
         store.set_position("/a.md".into(), Pos2::new(1.0, 2.0));
-        assert_eq!(store.remove_position(Path::new("/a.md")), Some(Pos2::new(1.0, 2.0)));
+        assert_eq!(
+            store.remove_position(Path::new("/a.md")),
+            Some(Pos2::new(1.0, 2.0))
+        );
         assert_eq!(store.remove_position(Path::new("/a.md")), None);
         assert!(store.is_empty());
     }
@@ -200,6 +216,9 @@ mod tests {
         store.set_position("/b.md".into(), Pos2::ZERO);
         let stored = store.positions();
         let paths: Vec<&Path> = stored.iter().map(|(p, _)| p.as_path()).collect();
-        assert_eq!(paths, vec![Path::new("/a.md"), Path::new("/b.md"), Path::new("/c.md")]);
+        assert_eq!(
+            paths,
+            vec![Path::new("/a.md"), Path::new("/b.md"), Path::new("/c.md")]
+        );
     }
 }
