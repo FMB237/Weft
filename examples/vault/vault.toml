@@ -1,0 +1,2 @@
+name = "Example Vault"
+extensions = ["md", "markdown"]

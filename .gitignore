@@ -1,0 +1,14 @@
+# Build output
+/target
+
+# Cached graph layout files (per-vault runtime state)
+*.layout.json
+.editor/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

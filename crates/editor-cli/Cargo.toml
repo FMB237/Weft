@@ -1,0 +1,16 @@
+[package]
+name = "editor-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "editor-cli"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+editor-core = { path = "../editor-core" }
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
