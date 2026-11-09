@@ -1,17 +1,24 @@
 //! Markdown preview panel.
 //!
-//! Renders the currently open document as formatted markdown.
+//! Renders the currently open document with `egui_commonmark`, and shows TOML
+//! frontmatter as a metadata card instead of raw body text.
 
-use editor_core::parser::markdown_to_html;
+use editor_core::document::Frontmatter;
+use editor_core::parser::{parse_frontmatter, split_frontmatter};
 use egui::Ui;
+use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use std::path::PathBuf;
 
 #[derive(Debug)]
-pub struct PreviewPanel;
+pub struct PreviewPanel {
+    cache: CommonMarkCache,
+}
 
 impl PreviewPanel {
     pub fn new() -> Self {
-        Self
+        Self {
+            cache: CommonMarkCache::default(),
+        }
     }
 
     /// Show the preview of the current document.
@@ -29,19 +36,61 @@ impl PreviewPanel {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("untitled");
-        ui.heading(format!("{name} - Preview"));
+        ui.horizontal(|ui| {
+            ui.heading(name);
+            ui.label("— preview");
+        });
         ui.separator();
 
-        // Render markdown as HTML.
-        let mut html = markdown_to_html(document_content);
-        ui.add(
-            egui::TextEdit::multiline(&mut html)
-                .id_salt("preview_markdown")
-                .desired_width(f32::INFINITY)
-                .desired_rows(20)
-                .frame(false),
-        );
+        let frontmatter = parse_frontmatter(document_content);
+        let (_, body) = split_frontmatter(document_content);
+
+        if has_frontmatter(&frontmatter) {
+            show_frontmatter_card(ui, &frontmatter);
+            ui.add_space(8.0);
+        }
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.style_mut().url_in_tooltip = true;
+                CommonMarkViewer::new().show(ui, &mut self.cache, body);
+            });
     }
+}
+
+fn has_frontmatter(frontmatter: &Frontmatter) -> bool {
+    frontmatter.title.is_some()
+        || !frontmatter.tags.is_empty()
+        || frontmatter.created.is_some()
+        || frontmatter.modified.is_some()
+        || !frontmatter.other.is_empty()
+}
+
+fn show_frontmatter_card(ui: &mut Ui, frontmatter: &Frontmatter) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        if let Some(title) = &frontmatter.title {
+            ui.heading(title);
+        }
+        if !frontmatter.tags.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Tags:");
+                for tag in &frontmatter.tags {
+                    ui.label(egui::RichText::new(format!("#{tag}")).monospace());
+                }
+            });
+        }
+        if let Some(created) = &frontmatter.created {
+            ui.label(format!("Created: {created}"));
+        }
+        if let Some(modified) = &frontmatter.modified {
+            ui.label(format!("Modified: {modified}"));
+        }
+        for (key, value) in &frontmatter.other {
+            ui.label(format!("{key}: {value}"));
+        }
+    });
 }
 
 impl Default for PreviewPanel {

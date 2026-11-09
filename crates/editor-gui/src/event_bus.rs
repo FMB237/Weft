@@ -21,6 +21,10 @@ pub enum Event {
     DocumentSaved(PathBuf),
     /// The vault contents changed (files added/removed/renamed).
     VaultChanged,
+    /// A file or directory was renamed.
+    EntryRenamed(PathBuf, PathBuf),
+    /// A file or directory was deleted.
+    EntryDeleted(PathBuf),
     /// Theme changed.
     ThemeChanged,
 }

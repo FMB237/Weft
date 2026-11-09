@@ -13,27 +13,28 @@ exists today**, **what is broken**, and **the order in which to fix it**.
 | Item | State |
 |------|-------|
 | Workspace | 3 crates: `editor-core`, `editor-gui`, `editor-cli` |
-| Size | ~5,300 lines of Rust |
+| Size | ~6,000 lines of Rust |
 | Build | `cargo check --workspace --all-targets` passes |
-| Tests | Core: 55 unit + 13 integration pass. GUI: 15/16 pass |
-| Known failure | `settings::tests::settings_default` |
-| Git | Not initialized |
-| Docs | `README.md` and `PLAN.md` overstate what is finished |
+| Tests | Core: 60 unit + 13 integration pass. GUI: 21 unit + 5 integration pass |
+| Known failure | none |
+| Git | Initialized; M0 + M1 milestones committed |
+| Docs | `README.md` matches the current feature set; M2 work is listed below |
 
 ### The one-sentence diagnosis
 
-The domain core is mostly real; the GUI is a skeleton that is **not wired to
-the core**, so the app compiles and runs but does not behave like the product
-described in the README.
+The domain core is mostly real, and after M1 the editor, preview, file tree,
+and persistence are wired and usable daily. The remaining gap is the graph:
+it has **nodes but no edges**, so Obsidian-style backlinks and search are not
+yet wired.
 
 ### Core capabilities vs. GUI wiring
 
 | Capability | Lives in | Wired to GUI? |
 |---|---|---|
-| Markdown parsing, wikilinks | `editor-core/src/parser.rs` | Titles only |
+| Markdown parsing, wikilinks | `editor-core/src/parser.rs` | Preview + titles |
 | Link graph edges | `editor-core/src/graph_updater.rs` | **No** |
 | Force-directed layout | `editor-core/src/layout.rs` | Yes |
-| Layout persistence | `editor-core/src/layout_store.rs` | **No disk I/O** |
+| Layout persistence | `editor-core/src/layout_store.rs` | Yes (`<vault>/.editor/layout.json`) |
 | Tantivy full-text search | `editor-core/src/index.rs` | **No** |
 | File watcher | `editor-core/src/watcher.rs` | **No** |
 | Clustering | `editor-core/src/clustering.rs` | **No** |
@@ -200,37 +201,37 @@ errors, and the repo has a first commit.
 
 Goal: usable daily for notes, even before the graph is fixed.
 
-- [ ] **State + persistence**
-  - [ ] Consolidate theme/settings into one `Settings`.
-  - [ ] Persist `Settings` and `AppState` on exit and every 30s.
-  - [ ] Reopen the last vault and last document on startup.
-  - [ ] Save `LayoutStore` to `<vault>/.editor/layout.json` on drag and exit.
-- [ ] **Preview**
-  - [ ] Add `egui_commonmark = "0.18"` (the release that targets egui 0.29).
-  - [ ] Replace the `TextEdit`-with-HTML in `panels/preview.rs` with
+- [x] **State + persistence**
+  - [x] Consolidate theme/settings into one `Settings`.
+  - [x] Persist `Settings` and `AppState` on exit and every 30s.
+  - [x] Reopen the last vault and last document on startup.
+  - [x] Save `LayoutStore` to `<vault>/.editor/layout.json` on drag and exit.
+- [x] **Preview**
+  - [x] Add `egui_commonmark = "0.18"` (the release that targets egui 0.29).
+  - [x] Replace the `TextEdit`-with-HTML in `panels/preview.rs` with
         `CommonMarkViewer`.
-  - [ ] Remove the duplicate preview: keep it inside the split **or** the
+  - [x] Remove the duplicate preview: keep it inside the split **or** the
         right panel, not both.
-  - [ ] Show frontmatter as a metadata card, not as body text.
-- [ ] **Editor**
-  - [ ] Implement a real draggable split using the stored ratio.
-  - [ ] Apply `settings.font_size` to the editor text.
-  - [ ] Apply the existing `SyntaxHighlighter` through `TextEdit::layouter`.
-  - [ ] Dirty-state indicator and confirm-before-discard on switch/close.
-  - [ ] Window title: `filename — Markdown Editor` with `*` when dirty.
-- [ ] **File tree**
-  - [ ] Nested folders with expand/collapse, not a flat list.
-  - [ ] Context menu: New Note, New Folder, Rename, Delete, Reveal path.
-  - [ ] Guard destructive actions when the open note is dirty.
-  - [ ] Highlight the active file and keep it scrolled into view.
-- [ ] **Shortcuts**
-  - [ ] `Ctrl/Cmd+S` save, `Ctrl/Cmd+O` open vault, `Ctrl/Cmd+N` new note.
-  - [ ] `Ctrl/Cmd+P` command palette; `Ctrl/Cmd+G` graph (fix the mismatch).
-  - [ ] `Ctrl/Cmd+Shift+P` export note; `Ctrl/Cmd+Shift+B` export vault.
-  - [ ] `Ctrl/Cmd+W` close note; `Ctrl/Cmd+Tab` cycle notes.
-  - [ ] Implement Undo/Redo or remove the menu entries.
-- [ ] **Auto-save**
-  - [ ] Respect `settings.auto_save_interval_secs` (0 = off), not hardcoded 30s.
+  - [x] Show frontmatter as a metadata card, not as body text.
+- [x] **Editor**
+  - [x] Implement a real draggable split using the stored ratio.
+  - [x] Apply `settings.font_size` to the editor text.
+  - [x] Apply the existing `SyntaxHighlighter` through `TextEdit::layouter`.
+  - [x] Dirty-state indicator and confirm-before-discard on switch/close.
+  - [x] Window title: `filename — Markdown Editor` with `*` when dirty.
+- [x] **File tree**
+  - [x] Nested folders with expand/collapse, not a flat list.
+  - [x] Context menu: New Note, New Folder, Rename, Delete, Reveal path.
+  - [x] Guard destructive actions when the open note is dirty.
+  - [x] Highlight the active file and keep it scrolled into view.
+- [x] **Shortcuts**
+  - [x] `Ctrl/Cmd+S` save, `Ctrl/Cmd+O` open vault, `Ctrl/Cmd+N` new note.
+  - [x] `Ctrl/Cmd+P` command palette; `Ctrl/Cmd+G` graph (fix the mismatch).
+  - [x] `Ctrl/Cmd+Shift+P` export note; `Ctrl/Cmd+Shift+B` export vault.
+  - [x] `Ctrl/Cmd+W` close note; `Ctrl/Cmd+Tab` cycle notes.
+  - [x] Implement Undo/Redo or remove the menu entries.
+- [x] **Auto-save**
+  - [x] Respect `settings.auto_save_interval_secs` (0 = off), not hardcoded 30s.
 
 **Done when:** open → edit → preview → save → switch → quit → relaunch restores
 the exact document with no lost edits.
@@ -313,23 +314,23 @@ README screenshots/description match what the app actually does.
 
 ## 6. Bug backlog with exact locations
 
-| # | Bug | Location | Fix in |
+| # | Bug | Location | Status |
 |---|---|---|---|
 | 1 | Graph has no edges | `editor-gui/src/app.rs` `rebuild_graph` | M2 |
-| 2 | Graph edits a clone | `editor-gui/src/panels/graph.rs:33` | M2 |
-| 3 | Preview shows raw HTML | `editor-gui/src/panels/preview.rs:31` | M1 |
-| 4 | Split ratio ignored | `editor-gui/src/panels/editor_split.rs:41` | M1 |
-| 5 | State/settings never saved | `editor-gui/src/app.rs:41`, `:575` | M1 |
-| 6 | Auto-save hardcodes 30s | `editor-gui/src/app.rs:219` | M1 |
-| 7 | Shortcut labels are wrong | `editor-gui/src/app.rs:262`, `:435` | M1 |
-| 8 | `Settings::default` font 0.0 | `editor-gui/src/settings.rs:15` | M0 |
+| 2 | Graph edits a clone | `editor-gui/src/panels/graph.rs:33` | fixed in M1 |
+| 3 | Preview shows raw HTML | `editor-gui/src/panels/preview.rs:31` | fixed in M1 |
+| 4 | Split ratio ignored | `editor-gui/src/panels/editor_split.rs:41` | fixed in M1 |
+| 5 | State/settings never saved | `editor-gui/src/app.rs:41`, `:575` | fixed in M1 |
+| 6 | Auto-save hardcodes 30s | `editor-gui/src/app.rs:219` | fixed in M1 |
+| 7 | Shortcut labels are wrong | `editor-gui/src/app.rs:262`, `:435` | fixed in M1 |
+| 8 | `Settings::default` font 0.0 | `editor-gui/src/settings.rs:15` | fixed in M0 |
 | 9 | Frontmatter is TOML-only | `editor-core/src/document.rs:93` | M3 |
 | 10 | Wikilinks do not resolve `.md` | `editor-core/src/graph_updater.rs:81` | M2 |
-| 11 | `comrak` configured but unused | `editor-core/src/parser.rs:49` | M0 |
+| 11 | `comrak` configured but unused | `editor-core/src/parser.rs:49` | fixed in M0 |
 | 12 | Search snippet is the title | `editor-core/src/index.rs:128` | M2 |
 | 13 | Export title is unescaped | `editor-core/src/export.rs:20` | M3 |
 | 14 | CLI can double the vault path | `editor-cli/src/main.rs:64` | M3 |
-| 15 | Dead `panels/editor.rs` | `editor-gui/src/panels/` | M0 |
+| 15 | Dead `panels/editor.rs` | `editor-gui/src/panels/` | fixed in M0 |
 | 16 | Layout cache ignores identity | `editor-gui/src/widgets/graph_canvas.rs:99` | M2 |
 
 ---

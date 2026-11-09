@@ -4,9 +4,28 @@ A local-first markdown editor written in Rust. Desktop UI is built with
 **eframe/egui**; the storage, parsing, graph, search and export logic lives in
 a separate, GUI-independent core crate.
 
-> **Status:** early. The foundation builds and tests cleanly; the editor is
-> usable for basic note-taking, but several planned features (rich preview,
-> persistence, graph editing) are still in progress. See [PLAN.md](PLAN.md).
+> **Status:** usable for daily note-taking. Nested file tree, live Markdown
+> preview, settings/state persistence, and graph layout persistence work. The
+> link graph still needs edges, and backlinks/search are not wired to the GUI
+> yet — see [PLAN.md](PLAN.md) for the remaining milestones.
+
+## Features
+
+- **Vaults:** open a folder of Markdown files; the last vault and note reopen
+  on launch.
+- **Editor:** syntax-highlighted Markdown editing with configurable font size,
+  dirty-state indicator, and save-on-demand or timed auto-save.
+- **Preview:** rendered Markdown via `egui_commonmark`, with frontmatter shown
+  as a metadata card. Drag the divider to resize editor and preview.
+- **File tree:** nested folders with expand/collapse and a context menu for
+  new notes/folders, rename, delete, and reveal-in-file-manager.
+- **Graph:** draggable node layout persisted to `<vault>/.editor/layout.json`
+  (edges and backlinks are the next milestone).
+- **Export:** a note to standalone HTML, or the whole vault to a bundle.
+- **Shortcuts:** `Ctrl/Cmd+S` save, `Ctrl/Cmd+O` open vault, `Ctrl/Cmd+N` new
+  note, `Ctrl/Cmd+P` command palette, `Ctrl/Cmd+G` graph, `Ctrl/Cmd+W` close
+  note, `Ctrl/Cmd+Tab` next note, `Ctrl/Cmd+Shift+P` export note,
+  `Ctrl/Cmd+Shift+B` export vault.
 
 ## Workspace
 

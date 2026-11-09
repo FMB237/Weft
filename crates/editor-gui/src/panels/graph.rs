@@ -25,18 +25,15 @@ impl GraphPanel {
     pub fn show(
         &mut self,
         ui: &mut Ui,
-        graph: &LinkGraph,
+        graph: &mut LinkGraph,
         layout_store: &mut LayoutStore,
         event_bus: &mut EventBus,
         selected_path: Option<&std::path::Path>,
-    ) {
+    ) -> bool {
         ui.heading("Graph View");
-        let mut graph_mut = graph.clone();
-        let response = self
-            .canvas
-            .show(ui, &graph_mut, layout_store, selected_path);
+        let response = self.canvas.show(ui, graph, layout_store, selected_path);
         self.canvas
-            .handle_input(&response, ui.ctx(), &mut graph_mut, layout_store, event_bus);
+            .handle_input(&response, ui.ctx(), graph, layout_store, event_bus)
     }
 }
 

@@ -61,17 +61,26 @@ pub fn parse_markdown(path: &Path, content: &str) -> ParsedDocument {
     }
 }
 
-pub fn parse_frontmatter(content: &str) -> crate::document::Frontmatter {
-    let stripped = content.trim_start();
+/// Split an optional TOML frontmatter block from the markdown body.
+///
+/// Returns `(frontmatter, body)`. When no frontmatter is present the first
+/// element is `None` and `body` is the original input unchanged.
+pub fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
+    let leading_ws = content.len() - content.trim_start().len();
+    let stripped = &content[leading_ws..];
     if let Some(rest) = stripped.strip_prefix("---\n")
         && let Some(end_idx) = rest.find("\n---\n")
     {
-        let fm_str = &rest[..end_idx];
-        if let Ok(fm) = toml_edit::de::from_str(fm_str) {
-            return fm;
-        }
+        return (Some(&rest[..end_idx]), &rest[end_idx + 5..]);
     }
-    crate::document::Frontmatter::default()
+    (None, content)
+}
+
+pub fn parse_frontmatter(content: &str) -> crate::document::Frontmatter {
+    let (frontmatter, _) = split_frontmatter(content);
+    frontmatter
+        .and_then(|fm| toml_edit::de::from_str(fm).ok())
+        .unwrap_or_default()
 }
 
 /// Render markdown to HTML (standalone helper).
@@ -132,5 +141,29 @@ mod tests {
                 alias: None
             }]
         );
+    }
+
+    #[test]
+    fn split_frontmatter_extracts_body() {
+        let content = "---\ntitle = \"Hello\"\n---\n\n# Body";
+        let (fm, body) = split_frontmatter(content);
+        assert_eq!(fm, Some("title = \"Hello\""));
+        assert_eq!(body, "\n# Body");
+    }
+
+    #[test]
+    fn split_frontmatter_without_block_returns_input() {
+        let content = "# Just a note";
+        let (fm, body) = split_frontmatter(content);
+        assert!(fm.is_none());
+        assert_eq!(body, content);
+    }
+
+    #[test]
+    fn split_frontmatter_tolerates_leading_blank_lines() {
+        let content = "\n\n---\ntitle = \"Hello\"\n---\nBody";
+        let (fm, body) = split_frontmatter(content);
+        assert_eq!(fm, Some("title = \"Hello\""));
+        assert_eq!(body, "Body");
     }
 }

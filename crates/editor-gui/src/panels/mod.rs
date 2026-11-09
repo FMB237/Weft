@@ -14,7 +14,6 @@ use crate::panels::file_tree::FileTreePanel;
 use crate::panels::graph::GraphPanel;
 use crate::panels::preview::PreviewPanel;
 use crate::panels::search::SearchPanel;
-use crate::theme::Theme;
 use serde::{Deserialize, Serialize};
 
 /// Identifier for each dockable panel.
@@ -36,8 +35,6 @@ pub enum PanelId {
 pub struct Panels {
     /// Currently active panel.
     pub active: PanelId,
-    /// Theme settings shared across panels.
-    pub theme: Theme,
     /// Left side panel: file tree.
     pub file_tree: FileTreePanel,
     /// Central panel: editor + preview split.
@@ -61,7 +58,6 @@ impl Panels {
     pub fn new() -> Self {
         Self {
             active: PanelId::default(),
-            theme: Theme::new(),
             file_tree: FileTreePanel::new(),
             editor_split: EditorSplitPanel::new(),
             preview: PreviewPanel::new(),

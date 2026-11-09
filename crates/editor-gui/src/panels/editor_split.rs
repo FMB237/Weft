@@ -27,6 +27,10 @@ impl EditorSplitPanel {
     }
 
     /// Show the editor split panel.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "panel show methods take the shared document state explicitly"
+    )]
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -35,21 +39,31 @@ impl EditorSplitPanel {
         dirty: &mut bool,
         ctx: &egui::Context,
         split_ratio: &mut f32,
+        font_size: f32,
     ) {
-        // Split between editor (left) and preview (right) with draggable divider.
-        ui.columns(2, |columns| {
-            // Left column: Editor.
-            columns[0].heading("Editor");
-            self.editor
-                .show(&mut columns[0], open_document, document_content, dirty, ctx);
+        let total_width = ui.available_width().max(1.0);
+        let min_pane = (total_width * 0.2).clamp(80.0, 200.0);
+        let max_preview = (total_width - min_pane).max(min_pane);
+        let preview_width = (total_width * (1.0 - *split_ratio)).clamp(min_pane, max_preview);
 
-            // Right column: Preview.
-            columns[1].heading("Preview");
-            self.preview
-                .show(&mut columns[1], open_document, document_content);
-        });
+        // Draggable divider: the preview pane owns the right side, and the
+        // editor fills the remaining space.
+        let response = egui::SidePanel::right("editor_preview_split")
+            .resizable(true)
+            .default_width(preview_width)
+            .width_range(min_pane..=max_preview)
+            .show_inside(ui, |ui| {
+                self.preview
+                    .show(ui, open_document, document_content.as_str());
+            });
 
+        let actual_preview_width = response.response.rect.width();
+        *split_ratio = (1.0 - actual_preview_width / total_width).clamp(0.0, 1.0);
         self.split_ratio = *split_ratio;
+
+        ui.heading("Editor");
+        self.editor
+            .show(ui, open_document, document_content, dirty, ctx, font_size);
     }
 
     /// Get the current split ratio.

@@ -18,7 +18,6 @@ pub enum ThemeMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Theme {
     pub mode: ThemeMode,
-    pub font_size: f32,
     pub accent_color: [u8; 4],
 }
 
@@ -32,7 +31,6 @@ impl Theme {
     pub fn new() -> Self {
         Self {
             mode: ThemeMode::System,
-            font_size: 15.0,
             accent_color: [99, 102, 241, 255], // indigo-500 - modern default
         }
     }
@@ -40,7 +38,6 @@ impl Theme {
     pub fn dark() -> Self {
         Self {
             mode: ThemeMode::Dark,
-            font_size: 15.0,
             accent_color: [99, 102, 241, 255],
         }
     }
@@ -48,7 +45,6 @@ impl Theme {
     pub fn light() -> Self {
         Self {
             mode: ThemeMode::Light,
-            font_size: 15.0,
             accent_color: [79, 70, 229, 255], // indigo-600 for light mode
         }
     }
@@ -96,7 +92,6 @@ mod tests {
     fn theme_default() {
         let theme = Theme::default();
         assert_eq!(theme.mode, ThemeMode::System);
-        assert!((theme.font_size - 15.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -111,12 +106,10 @@ mod tests {
     fn theme_serialization() {
         let theme = Theme {
             mode: ThemeMode::Dark,
-            font_size: 16.0,
             accent_color: [255, 0, 0, 255],
         };
         let json = serde_json::to_string(&theme).unwrap();
         let loaded: Theme = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.mode, ThemeMode::Dark);
-        assert!((loaded.font_size - 16.0).abs() < f32::EPSILON);
     }
 }

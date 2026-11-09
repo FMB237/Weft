@@ -212,7 +212,8 @@ impl GraphCanvas {
         graph: &mut LinkGraph,
         layout_store: &mut LayoutStore,
         event_bus: &mut EventBus,
-    ) {
+    ) -> bool {
+        let mut moved_node = false;
         // Zoom with scroll wheel when hovered.
         if response.hovered() {
             let scroll = ctx.input(|i| i.raw_scroll_delta);
@@ -262,7 +263,7 @@ impl GraphCanvas {
         {
             let Some(node) = graph.node(selected).cloned() else {
                 self.selected = None;
-                return;
+                return moved_node;
             };
             let screen_pos = Self::node_graph_pos(&node, layout_store).map(|p| self.to_screen(p));
             if let Some(screen_pos) = screen_pos {
@@ -270,8 +271,11 @@ impl GraphCanvas {
                 let new_graph = self.to_graph(new_screen);
                 graph.set_node_position(selected, new_graph);
                 layout_store.set_position(node.path, new_graph);
+                moved_node = true;
             }
         }
+
+        moved_node
     }
 }
 
