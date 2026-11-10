@@ -21,23 +21,63 @@ pub struct ParsedDocument {
 }
 
 /// Extract wikilinks (`[[link]]` and `[[link|alias]]`) from markdown source.
+///
+/// Links inside fenced code blocks (```` ``` ```` or `~~~`) are ignored so
+/// documentation examples do not turn into graph edges.
 pub fn extract_wikilinks(content: &str) -> Vec<Wikilink> {
     let mut links = Vec::new();
-    let chars = content.char_indices().peekable();
-    for (i, _) in chars {
-        if content.get(i..i + 2) == Some("[[") {
-            let end = content[i + 2..].find("]]");
-            if let Some(end) = end {
-                let link = &content[i + 2..i + 2 + end];
-                let (target, alias) = if let Some(pipe) = link.find('|') {
-                    (link[..pipe].to_string(), Some(link[pipe + 1..].to_string()))
-                } else {
-                    (link.to_string(), None)
-                };
-                links.push(Wikilink { target, alias });
+    let mut fence: Option<String> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        let marker = if trimmed.starts_with("```") {
+            Some("```")
+        } else if trimmed.starts_with("~~~") {
+            Some("~~~")
+        } else {
+            None
+        };
+
+        if let Some(marker) = marker {
+            match fence.as_deref() {
+                None => {
+                    fence = Some(marker.to_string());
+                    continue;
+                }
+                Some(open) if open == marker => {
+                    fence = None;
+                    continue;
+                }
+                Some(_) => {}
             }
         }
+
+        if fence.is_some() {
+            continue;
+        }
+
+        let mut rest = line;
+        while let Some(start) = rest.find("[[") {
+            let after = &rest[start + 2..];
+            let Some(end) = after.find("]]") else {
+                break;
+            };
+            let inner = &after[..end];
+            let (target, alias) = if let Some(pipe) = inner.find('|') {
+                (inner[..pipe].trim(), Some(inner[pipe + 1..].trim()))
+            } else {
+                (inner.trim(), None)
+            };
+            if !target.is_empty() {
+                links.push(Wikilink {
+                    target: target.to_string(),
+                    alias: alias.map(ToString::to_string),
+                });
+            }
+            rest = &after[end + 2..];
+        }
     }
+
     links
 }
 
@@ -141,6 +181,36 @@ mod tests {
                 alias: None
             }]
         );
+    }
+
+    #[test]
+    fn extract_wikilinks_skips_fenced_code_blocks() {
+        let content = "# A\n\n```rust\n[[not-a-link]]\n```\n\n[[real-link]]\n";
+        let links = extract_wikilinks(content);
+        assert_eq!(
+            links,
+            vec![Wikilink {
+                target: "real-link".into(),
+                alias: None
+            }]
+        );
+    }
+
+    #[test]
+    fn extract_wikilinks_handles_tilde_fences_and_multiple_per_line() {
+        let content = "~~~\n[[hidden]]\n~~~\n[[one]] and [[two|Two]]\n";
+        let links = extract_wikilinks(content);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].target, "one");
+        assert_eq!(links[1].target, "two");
+        assert_eq!(links[1].alias.as_deref(), Some("Two"));
+    }
+
+    #[test]
+    fn extract_wikilinks_ignores_empty_targets() {
+        let links = extract_wikilinks("[[ ]] and [[]] and [[ok]]");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "ok");
     }
 
     #[test]

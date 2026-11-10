@@ -1,24 +1,35 @@
 //! Custom graph rendering widget using `egui::Painter`.
 //!
 //! Renders a force-directed link graph with pan/zoom, node selection,
-//! and drag-to-reposition. Node positions are persisted via [`LayoutStore`].
+//! drag-to-reposition, degree-sized nodes, edge arrows, hover tooltips, and
+//! visually distinct placeholders for unresolved wikilinks. Node positions are
+//! persisted via [`LayoutStore`].
 
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::ffi::OsStr;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 
 use crate::event_bus::{Event, EventBus};
-use editor_core::graph::{LinkGraph, NodeId};
+use editor_core::graph::{GraphNode, LinkGraph, NodeId};
 use editor_core::layout::{LayoutParams, layout_graph};
 use editor_core::layout_store::LayoutStore;
-use egui::{Align2, Color32, FontFamily, FontId, Pos2, Response, Sense, Stroke, Vec2};
+use egui::{Align2, Color32, FontFamily, FontId, Id, Pos2, Response, Sense, Shape, Stroke, Vec2};
 
-/// Radius of each node circle.
-const NODE_RADIUS: f32 = 16.0;
+/// Base radius of a node circle.
+const NODE_RADIUS: f32 = 13.0;
+/// Extra radius added per connection (square root of the degree).
+const DEGREE_SCALE: f32 = 3.0;
+/// Largest node radius, so hubs do not swallow the canvas.
+const MAX_NODE_RADIUS: f32 = 30.0;
 /// Stroke for graph edges.
 const EDGE_STROKE: Stroke = Stroke {
     width: 1.0,
     color: Color32::from_rgb(140, 140, 140),
 };
+/// Arrowhead size in screen pixels.
+const ARROW_LENGTH: f32 = 8.0;
 /// Stroke for node circles.
 const NODE_STROKE: Stroke = Stroke {
     width: 1.5,
@@ -26,12 +37,18 @@ const NODE_STROKE: Stroke = Stroke {
 };
 /// Default fill for unselected nodes.
 const NODE_FILL: Color32 = Color32::from_rgb(40, 100, 180);
+/// Fill for unresolved link placeholders.
+const PLACEHOLDER_FILL: Color32 = Color32::from_rgb(85, 85, 95);
 /// Fill for selected nodes.
 const SELECTED_FILL: Color32 = Color32::from_rgb(220, 140, 50);
 /// Color for node title text.
 const TEXT_COLOR: Color32 = Color32::from_gray(240);
+/// Dim text for unresolved nodes.
+const PLACEHOLDER_TEXT: Color32 = Color32::from_gray(180);
 const OPEN_DOC_STROKE_WIDTH: f32 = 3.0;
 const OPEN_DOC_STROKE_COLOR: Color32 = Color32::from_rgb(255, 215, 0);
+/// Maximum number of characters shown in a node label.
+const LABEL_MAX_CHARS: usize = 22;
 
 /// A zoomable, pannable graph canvas.
 #[derive(Debug)]
@@ -44,9 +61,8 @@ pub struct GraphCanvas {
     pub selected: Option<NodeId>,
     /// Cached force-directed layout positions, keyed by node id.
     layout: Option<Vec<(NodeId, Pos2)>>,
-    /// Number of nodes/edges the cached layout was computed for.
-    layout_node_count: usize,
-    layout_edge_count: usize,
+    /// Hash of node/edge identity the cached layout was computed for.
+    layout_signature: u64,
     /// Whether the initial centering pan has been applied.
     centered: bool,
 }
@@ -59,10 +75,14 @@ impl GraphCanvas {
             zoom: 1.0,
             selected: None,
             layout: None,
-            layout_node_count: 0,
-            layout_edge_count: 0,
+            layout_signature: 0,
             centered: false,
         }
+    }
+
+    /// Reset view state and force a new layout, e.g. when the vault changes.
+    pub fn reset(&mut self) {
+        *self = Self::new();
     }
 
     /// Map a graph-space position to screen space.
@@ -80,30 +100,56 @@ impl GraphCanvas {
 
     /// Resolve the graph-space position of a node, preferring the stored
     /// position (from [`LayoutStore`] / drags) over the layout position.
-    fn node_graph_pos(
-        node: &editor_core::graph::GraphNode,
-        layout_store: &LayoutStore,
-    ) -> Option<Pos2> {
+    fn node_graph_pos(node: &GraphNode, layout_store: &LayoutStore) -> Option<Pos2> {
         layout_store.position(&node.path).or(node.position)
     }
 
     /// Ensure the cached layout is up to date with the current graph.
     fn ensure_layout(&mut self, graph: &LinkGraph) {
-        let node_count = graph.node_count();
-        let edge_count = graph.edge_count();
-        if self.layout.is_some()
-            && self.layout_node_count == node_count
-            && self.layout_edge_count == edge_count
-        {
+        let signature = Self::graph_signature(graph);
+        if self.layout.is_some() && self.layout_signature == signature {
             return;
         }
         let layout = layout_graph(graph, &LayoutParams::default());
         self.layout = Some(layout.positions);
-        self.layout_node_count = node_count;
-        self.layout_edge_count = edge_count;
+        self.layout_signature = signature;
+    }
+
+    /// Identity hash for the graph, so the layout recomputes when nodes or
+    /// edges change even if the counts stay the same.
+    fn graph_signature(graph: &LinkGraph) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        let mut paths: Vec<_> = graph
+            .node_ids()
+            .into_iter()
+            .filter_map(|id| graph.node(id).map(|node| node.path.clone()))
+            .collect();
+        paths.sort();
+        for path in paths {
+            path.hash(&mut hasher);
+        }
+        let mut edges: Vec<_> = graph
+            .edges()
+            .into_iter()
+            .filter_map(|edge| {
+                Some((
+                    graph.node(edge.source)?.path.clone(),
+                    graph.node(edge.target)?.path.clone(),
+                ))
+            })
+            .collect();
+        edges.sort();
+        for edge in edges {
+            edge.hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     /// Render the graph canvas into `ui` and return the interaction response.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "node, edge, label, and tooltip painting are one render pass"
+    )]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -145,63 +191,158 @@ impl GraphCanvas {
             .map(|positions| positions.iter().copied().collect())
             .unwrap_or_default();
 
-        // Draw edges first (behind nodes).
+        let degrees = Self::degrees(graph);
+        let radius_of = |id: NodeId| node_radius(degrees.get(&id).copied().unwrap_or(0));
+
+        // Draw edges first (behind nodes), with an arrowhead at the target.
         for edge in graph.edges() {
             let src_node = graph.node(edge.source);
             let tgt_node = graph.node(edge.target);
             if let (Some(src), Some(tgt)) = (src_node, tgt_node) {
-                let sp = Self::node_graph_pos(src, layout_store)
-                    .unwrap_or_else(|| *pos_map.get(&edge.source).unwrap_or(&Pos2::ZERO));
-                let tp = Self::node_graph_pos(tgt, layout_store)
-                    .unwrap_or_else(|| *pos_map.get(&edge.target).unwrap_or(&Pos2::ZERO));
-                painter.line_segment([self.to_screen(sp), self.to_screen(tp)], EDGE_STROKE);
+                let Some(sp) = Self::node_graph_pos(src, layout_store)
+                    .or_else(|| pos_map.get(&edge.source).copied())
+                else {
+                    continue;
+                };
+                let Some(tp) = Self::node_graph_pos(tgt, layout_store)
+                    .or_else(|| pos_map.get(&edge.target).copied())
+                else {
+                    continue;
+                };
+                let sp = self.to_screen(sp);
+                let tp = self.to_screen(tp);
+
+                let src_radius = radius_of(edge.source);
+                let tgt_radius = radius_of(edge.target);
+                let delta = tp - sp;
+                let distance = delta.length();
+                if distance <= src_radius + tgt_radius {
+                    continue;
+                }
+
+                let direction = delta / distance;
+                let start = sp + direction * src_radius;
+                let end = tp - direction * tgt_radius;
+                painter.line_segment([start, end], EDGE_STROKE);
+
+                let perpendicular = Vec2::new(-direction.y, direction.x);
+                let base = end - direction * ARROW_LENGTH;
+                painter.add(Shape::convex_polygon(
+                    vec![
+                        end,
+                        base + perpendicular * (ARROW_LENGTH * 0.5),
+                        base - perpendicular * (ARROW_LENGTH * 0.5),
+                    ],
+                    EDGE_STROKE.color,
+                    Stroke::NONE,
+                ));
             }
         }
+
+        let mut hovered: Option<NodeId> = None;
+        let hover_position = response.hover_pos();
 
         // Draw nodes.
         for node_id in graph.node_ids() {
             let Some(node) = graph.node(node_id) else {
                 continue;
             };
-            let screen_pos = match Self::node_graph_pos(node, layout_store) {
-                Some(p) => self.to_screen(p),
-                None => continue,
+            let Some(graph_pos) =
+                Self::node_graph_pos(node, layout_store).or_else(|| pos_map.get(&node_id).copied())
+            else {
+                continue;
             };
+            let screen_pos = self.to_screen(graph_pos);
+            let radius = radius_of(node_id);
+
+            if let Some(hover_position) = hover_position
+                && (screen_pos - hover_position).length() <= radius
+            {
+                hovered = Some(node_id);
+            }
+
             let is_selected = self.selected == Some(node_id);
             let fill = if is_selected {
                 SELECTED_FILL
-            } else {
+            } else if node.resolved {
                 NODE_FILL
+            } else {
+                PLACEHOLDER_FILL
             };
-            painter.circle_filled(screen_pos, NODE_RADIUS, fill);
-            painter.circle_stroke(screen_pos, NODE_RADIUS, NODE_STROKE);
+            painter.circle_filled(screen_pos, radius, fill);
+            painter.circle_stroke(screen_pos, radius, NODE_STROKE);
+
             // Highlight the node for the currently open document so the graph
-            // stays in sync with the editor (Phase 6.1 cross-panel sync).
+            // stays in sync with the editor.
             if let Some(path) = selected_path
                 && node.path == path
             {
                 painter.circle_stroke(
                     screen_pos,
-                    NODE_RADIUS + OPEN_DOC_STROKE_WIDTH,
+                    radius + OPEN_DOC_STROKE_WIDTH,
                     Stroke {
                         width: OPEN_DOC_STROKE_WIDTH,
                         color: OPEN_DOC_STROKE_COLOR,
                     },
                 );
             }
+
+            // Labels sit outside the circle so they stay readable.
+            let text_color = if node.resolved {
+                TEXT_COLOR
+            } else {
+                PLACEHOLDER_TEXT
+            };
             painter.text(
-                screen_pos,
-                Align2::CENTER_CENTER,
-                &node.title,
+                screen_pos + Vec2::new(0.0, radius + 3.0),
+                Align2::CENTER_TOP,
+                node_label(node),
                 FontId {
-                    size: 12.0,
+                    size: 11.0,
                     family: FontFamily::Proportional,
                 },
-                TEXT_COLOR,
+                text_color,
+            );
+        }
+
+        // Tooltip for the node under the pointer.
+        if !response.dragged()
+            && let Some(node_id) = hovered
+            && let Some(node) = graph.node(node_id)
+        {
+            egui::show_tooltip_at_pointer(
+                ui.ctx(),
+                ui.layer_id(),
+                Id::new("graph_node_tooltip"),
+                |ui| {
+                    let title = if node.title.trim().is_empty() {
+                        node.path.display().to_string()
+                    } else {
+                        node.title.clone()
+                    };
+                    ui.label(title);
+                    ui.label(node.path.display().to_string());
+                    if !node.resolved {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(200, 160, 90),
+                            "Missing note — click to create it later",
+                        );
+                    }
+                },
             );
         }
 
         response
+    }
+
+    /// Total (incoming + outgoing) degree per node.
+    fn degrees(graph: &LinkGraph) -> HashMap<NodeId, usize> {
+        let mut degrees: HashMap<NodeId, usize> = HashMap::new();
+        for edge in graph.edges() {
+            *degrees.entry(edge.source).or_default() += 1;
+            *degrees.entry(edge.target).or_default() += 1;
+        }
+        degrees
     }
 
     /// Handle pan/zoom/select/drag input.
@@ -235,7 +376,9 @@ impl GraphCanvas {
             self.pan += response.drag_delta();
         }
 
-        // Select a node on click.
+        let degrees = Self::degrees(graph);
+
+        // Select a node on click; clicking empty space clears the selection.
         if response.clicked()
             && let Some(cursor) = response.interact_pointer_pos()
         {
@@ -243,17 +386,21 @@ impl GraphCanvas {
                 let node = graph.node(id)?;
                 let pos = Self::node_graph_pos(node, layout_store)?;
                 let screen = self.to_screen(pos);
-                if (screen - cursor).length() <= NODE_RADIUS {
+                let radius = node_radius(degrees.get(&id).copied().unwrap_or(0));
+                if (screen - cursor).length() <= radius {
                     Some(id)
                 } else {
                     None
                 }
             });
-            if let Some(id) = selection {
-                self.selected = Some(id);
-                if let Some(node) = graph.node(id) {
-                    event_bus.publish(Event::NodeSelected(node.path.clone()));
+            match selection {
+                Some(id) => {
+                    self.selected = Some(id);
+                    if let Some(node) = graph.node(id) {
+                        event_bus.publish(Event::NodeSelected(node.path.clone()));
+                    }
                 }
+                None => self.selected = None,
             }
         }
 
@@ -282,5 +429,65 @@ impl GraphCanvas {
 impl Default for GraphCanvas {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Radius for a node with the given total degree.
+fn node_radius(degree: usize) -> f32 {
+    (NODE_RADIUS + (degree as f32).sqrt() * DEGREE_SCALE).min(MAX_NODE_RADIUS)
+}
+
+/// Short label for a node, falling back to the file stem.
+fn node_label(node: &GraphNode) -> String {
+    let raw = if node.title.trim().is_empty() {
+        node.path
+            .file_stem()
+            .and_then(OsStr::to_str)
+            .unwrap_or("untitled")
+    } else {
+        node.title.trim()
+    };
+    if raw.chars().count() <= LABEL_MAX_CHARS {
+        raw.to_string()
+    } else {
+        let mut label: String = raw.chars().take(LABEL_MAX_CHARS - 1).collect();
+        label.push('…');
+        label
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn node_radius_grows_with_degree_and_is_capped() {
+        assert!(node_radius(0) < node_radius(4));
+        assert!(node_radius(10_000) <= MAX_NODE_RADIUS);
+    }
+
+    #[test]
+    fn graph_signature_changes_with_edges_not_just_counts() {
+        let mut graph = LinkGraph::new();
+        let a = graph.add_node(PathBuf::from("a.md"), "A".into());
+        let b = graph.add_node(PathBuf::from("b.md"), "B".into());
+        let c = graph.add_node(PathBuf::from("c.md"), "C".into());
+        graph.add_edge(a, b, 1.0);
+        let first = GraphCanvas::graph_signature(&graph);
+
+        graph.remove_outgoing_edges(a);
+        graph.add_edge(a, c, 1.0);
+        let second = GraphCanvas::graph_signature(&graph);
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn node_label_uses_stem_for_untitled_nodes() {
+        let mut graph = LinkGraph::new();
+        let id = graph.add_node(PathBuf::from("notes/alpha.md"), String::new());
+        let node = graph.node(id).expect("node exists").clone();
+        assert_eq!(node_label(&node), "alpha");
     }
 }

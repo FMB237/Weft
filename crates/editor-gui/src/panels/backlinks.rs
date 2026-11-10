@@ -1,0 +1,76 @@
+//! Backlinks panel.
+//!
+//! Lists notes that link to the currently open document using
+//! [`GraphQuery::backlinks`]. Clicking a backlink opens the source note.
+
+use crate::event_bus::{Event, EventBus};
+use editor_core::graph::LinkGraph;
+use editor_core::graph_queries::GraphQuery;
+use egui::Ui;
+use std::path::Path;
+
+#[derive(Debug, Default)]
+pub struct BacklinksPanel;
+
+impl BacklinksPanel {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Show the backlinks for `open_document`.
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        graph: &LinkGraph,
+        open_document: Option<&Path>,
+        event_bus: &mut EventBus,
+    ) {
+        ui.heading("Backlinks");
+
+        let Some(path) = open_document else {
+            ui.label("Open a note to see which notes link to it.");
+            return;
+        };
+
+        let Some(node_id) = graph.node_by_path(path) else {
+            ui.label("This note is not in the graph yet.");
+            return;
+        };
+
+        let mut backlinks = GraphQuery::new(graph).backlinks(node_id);
+        backlinks.sort_by(|a, b| a.0.cmp(&b.0));
+        backlinks.dedup_by(|a, b| a.0 == b.0);
+
+        if backlinks.is_empty() {
+            ui.label("No other note links here yet.");
+            return;
+        }
+
+        egui::ScrollArea::horizontal()
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for (source, title) in backlinks {
+                        let label = if title.trim().is_empty() {
+                            source.display().to_string()
+                        } else {
+                            title
+                        };
+                        if ui.link(label).clicked() {
+                            event_bus.publish(Event::NodeSelected(source));
+                        }
+                    }
+                });
+            });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backlinks_panel_default() {
+        let _panel = BacklinksPanel::new();
+    }
+}

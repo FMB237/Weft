@@ -3,12 +3,14 @@
 //! Defines the [`PanelId`] enum, the [`Panels`] container holding all UI
 //! panels, and sub-modules for each individual panel.
 
+pub mod backlinks;
 pub mod editor_split;
 pub mod file_tree;
 pub mod graph;
 pub mod preview;
 pub mod search;
 
+use crate::panels::backlinks::BacklinksPanel;
 use crate::panels::editor_split::EditorSplitPanel;
 use crate::panels::file_tree::FileTreePanel;
 use crate::panels::graph::GraphPanel;
@@ -45,6 +47,8 @@ pub struct Panels {
     pub graph: GraphPanel,
     /// Search panel.
     pub search: SearchPanel,
+    /// Backlinks for the open note.
+    pub backlinks: BacklinksPanel,
 }
 
 impl Default for Panels {
@@ -63,6 +67,7 @@ impl Panels {
             preview: PreviewPanel::new(),
             graph: GraphPanel::new(),
             search: SearchPanel::new(),
+            backlinks: BacklinksPanel::new(),
         }
     }
 

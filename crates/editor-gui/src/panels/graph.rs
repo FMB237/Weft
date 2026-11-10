@@ -35,6 +35,10 @@ impl GraphPanel {
         self.canvas
             .handle_input(&response, ui.ctx(), graph, layout_store, event_bus)
     }
+    /// Reset pan/zoom/selection and recompute the layout (e.g. new vault).
+    pub fn reset(&mut self) {
+        self.canvas.reset();
+    }
 }
 
 impl Default for GraphPanel {

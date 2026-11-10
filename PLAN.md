@@ -13,32 +13,32 @@ exists today**, **what is broken**, and **the order in which to fix it**.
 | Item | State |
 |------|-------|
 | Workspace | 3 crates: `editor-core`, `editor-gui`, `editor-cli` |
-| Size | ~6,000 lines of Rust |
+| Size | ~7,800 lines of Rust |
 | Build | `cargo check --workspace --all-targets` passes |
-| Tests | Core: 60 unit + 13 integration pass. GUI: 21 unit + 5 integration pass |
+| Tests | Core: 73 unit + 13 integration pass. GUI: 26 unit + 5 integration pass |
 | Known failure | none |
-| Git | Initialized; M0 + M1 milestones committed |
-| Docs | `README.md` matches the current feature set; M2 work is listed below |
+| Git | Initialized; M0, M1, and M2 milestones committed |
+| Docs | `README.md` matches the current feature set; M3 work is listed below |
 
 ### The one-sentence diagnosis
 
-The domain core is mostly real, and after M1 the editor, preview, file tree,
-and persistence are wired and usable daily. The remaining gap is the graph:
-it has **nodes but no edges**, so Obsidian-style backlinks and search are not
-yet wired.
+The daily-driver loop is complete: the editor, preview, file tree, graph edges,
+backlinks, search, and filesystem watching all work together. The remaining gap
+is design polish and a few correctness items (YAML frontmatter, export/CLI
+escaping, docs).
 
 ### Core capabilities vs. GUI wiring
 
 | Capability | Lives in | Wired to GUI? |
 |---|---|---|
 | Markdown parsing, wikilinks | `editor-core/src/parser.rs` | Preview + titles |
-| Link graph edges | `editor-core/src/graph_updater.rs` | **No** |
+| Link graph edges | `editor-core/src/graph_updater.rs` | Yes |
 | Force-directed layout | `editor-core/src/layout.rs` | Yes |
 | Layout persistence | `editor-core/src/layout_store.rs` | Yes (`<vault>/.editor/layout.json`) |
-| Tantivy full-text search | `editor-core/src/index.rs` | **No** |
-| File watcher | `editor-core/src/watcher.rs` | **No** |
+| Tantivy full-text search | `editor-core/src/index.rs` | Yes (search panel) |
+| File watcher | `editor-core/src/watcher.rs` | Yes (background thread) |
 | Clustering | `editor-core/src/clustering.rs` | **No** |
-| Backlinks / centrality | `editor-core/src/graph_queries.rs` | **No** |
+| Backlinks / centrality | `editor-core/src/graph_queries.rs` | Backlinks yes; centrality not surfaced |
 | Export | `editor-core/src/export.rs` | Yes |
 | Plugins | `editor-core/src/plugins.rs` | Lifecycle only |
 
@@ -242,40 +242,40 @@ the exact document with no lost edits.
 
 Goal: deliver the Obsidian-like features that make this project distinct.
 
-- [ ] **Build edges**
-  - [ ] Replace the node-only `rebuild_graph()` with `GraphUpdater`, or reuse
+- [x] **Build edges**
+  - [x] Replace the node-only `rebuild_graph()` with `GraphUpdater`, or reuse
         its logic, so every wikilink becomes an edge.
-  - [ ] Fix `resolve_link` (`graph_updater.rs`) with this order:
+  - [x] Fix `resolve_link` (`graph_updater.rs`) with this order:
         1. exact relative path
         2. `target + ".md"`
         3. case-insensitive match on file stem
         4. vault-root match
         5. otherwise keep as an unresolved placeholder node styled differently
-  - [ ] Skip wikilinks inside fenced code blocks.
-  - [ ] Add tests for `[[Home]]`, `[[Projects/Alpha]]`, aliases, missing
+  - [x] Skip wikilinks inside fenced code blocks.
+  - [x] Add tests for `[[Home]]`, `[[Projects/Alpha]]`, aliases, missing
         targets, and duplicate links.
-  - [ ] Fix `examples/vault` links so the demo shows a connected graph.
-- [ ] **Graph panel**
-  - [ ] Stop cloning the graph in `panels/graph.rs`; pass `&mut LinkGraph`.
-  - [ ] Invalidate the layout cache on node/edge identity change, not just
+  - [x] Fix `examples/vault` links so the demo shows a connected graph.
+- [x] **Graph panel**
+  - [x] Stop cloning the graph in `panels/graph.rs`; pass `&mut LinkGraph`.
+  - [x] Invalidate the layout cache on node/edge identity change, not just
         counts.
-  - [ ] Reset centering when the vault changes.
-  - [ ] Persist and reload node positions across sessions.
-  - [ ] Draw labels outside nodes, radius by degree, hover tooltip, edge
+  - [x] Reset centering when the vault changes.
+  - [x] Persist and reload node positions across sessions.
+  - [x] Draw labels outside nodes, radius by degree, hover tooltip, edge
         arrows, click-empty-to-deselect.
   - [ ] Optional: color nodes by `cluster_graph`.
-- [ ] **Backlinks**
-  - [ ] New `panels/backlinks.rs` showing `GraphQuery::backlinks` for the open
+- [x] **Backlinks**
+  - [x] New `panels/backlinks.rs` showing `GraphQuery::backlinks` for the open
         note; clicking opens the source note.
-- [ ] **Search**
-  - [ ] Index the vault on open and update on save/delete.
-  - [ ] Render `SearchPanel` (dock or tab) with results, snippets, and
+- [x] **Search**
+  - [x] Index the vault on open and update on save/delete.
+  - [x] Render `SearchPanel` (dock or tab) with results, snippets, and
         keyboard navigation.
-  - [ ] Replace the `snippet = title` stub in `index.rs` with a real snippet.
-- [ ] **Watcher (optional but recommended)**
-  - [ ] Run `Watcher` on a background thread; poll the channel each frame.
-  - [ ] Apply events through `GraphUpdater` and `SearchIndex`.
-  - [ ] If dirty locally, never overwrite the buffer; show a conflict banner.
+  - [x] Replace the `snippet = title` stub in `index.rs` with a real snippet.
+- [x] **Watcher (optional but recommended)**
+  - [x] Run `Watcher` on a background thread; poll the channel each frame.
+  - [x] Apply events through `GraphUpdater` and `SearchIndex`.
+  - [x] If dirty locally, never overwrite the buffer; show a conflict banner.
 
 **Done when:** the example vault shows a connected graph, clicking a node
 opens the note, backlinks update after saving, and search returns useful
@@ -316,7 +316,7 @@ README screenshots/description match what the app actually does.
 
 | # | Bug | Location | Status |
 |---|---|---|---|
-| 1 | Graph has no edges | `editor-gui/src/app.rs` `rebuild_graph` | M2 |
+| 1 | Graph has no edges | `editor-gui/src/app.rs` `rebuild_graph` | fixed in M2 |
 | 2 | Graph edits a clone | `editor-gui/src/panels/graph.rs:33` | fixed in M1 |
 | 3 | Preview shows raw HTML | `editor-gui/src/panels/preview.rs:31` | fixed in M1 |
 | 4 | Split ratio ignored | `editor-gui/src/panels/editor_split.rs:41` | fixed in M1 |
@@ -325,13 +325,13 @@ README screenshots/description match what the app actually does.
 | 7 | Shortcut labels are wrong | `editor-gui/src/app.rs:262`, `:435` | fixed in M1 |
 | 8 | `Settings::default` font 0.0 | `editor-gui/src/settings.rs:15` | fixed in M0 |
 | 9 | Frontmatter is TOML-only | `editor-core/src/document.rs:93` | M3 |
-| 10 | Wikilinks do not resolve `.md` | `editor-core/src/graph_updater.rs:81` | M2 |
+| 10 | Wikilinks do not resolve `.md` | `editor-core/src/graph_updater.rs:81` | fixed in M2 |
 | 11 | `comrak` configured but unused | `editor-core/src/parser.rs:49` | fixed in M0 |
-| 12 | Search snippet is the title | `editor-core/src/index.rs:128` | M2 |
+| 12 | Search snippet is the title | `editor-core/src/index.rs:128` | fixed in M2 |
 | 13 | Export title is unescaped | `editor-core/src/export.rs:20` | M3 |
 | 14 | CLI can double the vault path | `editor-cli/src/main.rs:64` | M3 |
 | 15 | Dead `panels/editor.rs` | `editor-gui/src/panels/` | fixed in M0 |
-| 16 | Layout cache ignores identity | `editor-gui/src/widgets/graph_canvas.rs:99` | M2 |
+| 16 | Layout cache ignores identity | `editor-gui/src/widgets/graph_canvas.rs:99` | fixed in M2 |
 
 ---
 
@@ -372,6 +372,8 @@ Add GUI-logic tests as pure functions, not by driving egui:
 | 2026-11-09 | No CSS layer | Pure Rust UI uses design tokens; avoid a webview |
 | 2026-11-09 | Core must not depend on egui | Keep domain portable and testable |
 | 2026-11-09 | Graph edges via `GraphUpdater` | Logic exists and is tested |
+| 2026-11-10 | Watcher on a dedicated thread with current-thread tokio | Keeps egui frame loop non-blocking; std channel is polled per frame |
+| 2026-11-10 | Unresolved links become placeholder nodes | Keeps the graph honest and makes missing notes visible |
 
 ---
 

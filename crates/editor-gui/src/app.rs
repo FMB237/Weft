@@ -8,9 +8,11 @@ use std::path::{Path, PathBuf};
 
 use editor_core::export::{export_document, export_vault_bundle};
 use editor_core::graph::LinkGraph;
+use editor_core::graph_updater::GraphUpdater;
+use editor_core::index::SearchIndex;
 use editor_core::layout_store::LayoutStore;
-use editor_core::parser::parse_frontmatter;
 use editor_core::vault::Vault;
+use editor_core::watcher::{WatchEvent, WatchHandle};
 
 use eframe::Storage;
 use egui::{CentralPanel, Key, SidePanel, TopBottomPanel};
@@ -117,6 +119,14 @@ pub struct EditorApp {
     pending_action: Option<PendingAction>,
     /// Last title sent to the window manager, to avoid redundant commands.
     last_window_title: String,
+    /// Full-text search index for the open vault.
+    search_index: Option<SearchIndex>,
+    /// Background filesystem watcher for the open vault.
+    watcher: Option<WatchHandle>,
+    /// Whether the search panel is visible.
+    search_open: bool,
+    /// Notice shown when a file changed on disk while the buffer was dirty.
+    external_change: Option<String>,
 }
 
 impl std::fmt::Debug for EditorApp {
@@ -163,6 +173,10 @@ impl EditorApp {
             command_palette_input: String::new(),
             pending_action: None,
             last_window_title: String::new(),
+            search_index: None,
+            watcher: None,
+            search_open: false,
+            external_change: None,
         };
 
         // Re-open the last vault and document, if they still exist.
@@ -194,6 +208,10 @@ impl EditorApp {
                 self.document_content.clear();
                 self.dirty = false;
                 self.last_auto_save = std::time::Instant::now();
+                self.panels.graph.reset();
+                self.watcher = WatchHandle::start(path).ok();
+                self.rebuild_search_index();
+                self.panels.search.invalidate();
                 self.rebuild_graph();
                 let _ = self
                     .plugins
@@ -226,28 +244,41 @@ impl EditorApp {
     }
 
     /// Rebuild the link graph from the current vault's files.
+    ///
+    /// Every wikilink becomes a directed weighted edge through
+    /// [`GraphUpdater`], so the graph reflects the vault instead of only its
+    /// node list.
     pub(crate) fn rebuild_graph(&mut self) {
         let Some(vault) = &self.vault else { return };
-        let Ok(files) = vault.list_files() else {
+
+        let mut graph = LinkGraph::new();
+        {
+            let mut updater = GraphUpdater::new(&mut graph, vault);
+            let _ = updater.rebuild();
+        }
+        self.layout_store.apply_to_graph(&mut graph);
+        self.graph = graph;
+    }
+
+    /// Rebuild the full-text index from the current vault.
+    pub(crate) fn rebuild_search_index(&mut self) {
+        let Some(vault) = &self.vault else {
+            self.search_index = None;
             return;
         };
 
-        self.graph = LinkGraph::new();
-        for file in &files {
-            if let Ok(content) = vault.read(file) {
-                let frontmatter = parse_frontmatter(&content);
-                let title = frontmatter.title.clone().unwrap_or_else(|| {
-                    file.file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("untitled")
-                        .to_string()
-                });
-                self.graph.add_node(file.clone(), title);
+        let Ok(mut index) = SearchIndex::new() else {
+            self.search_index = None;
+            return;
+        };
+        if let Ok(files) = vault.list_files() {
+            for file in files {
+                if let Ok(content) = vault.read(&file) {
+                    let _ = index.add_document(&file, &content);
+                }
             }
         }
-
-        // Apply stored positions to the graph.
-        self.layout_store.apply_to_graph(&mut self.graph);
+        self.search_index = Some(index);
     }
 
     /// Open a document for editing.
@@ -311,6 +342,9 @@ impl EditorApp {
         if vault.write(&path, &self.document_content).is_ok() {
             self.dirty = false;
             self.last_auto_save = std::time::Instant::now();
+            if let Some(index) = &mut self.search_index {
+                let _ = index.add_document(&path, &self.document_content);
+            }
             self.event_bus.publish(Event::DocumentSaved(path.clone()));
             let _ = self.plugins.dispatch(&PluginEvent::DocumentSaved(path));
             self.rebuild_graph();
@@ -322,6 +356,9 @@ impl EditorApp {
         let Some(vault) = &self.vault else { return };
         let path = unique_child_path(vault, Path::new(""), "Untitled", "md");
         if vault.write(&path, "").is_ok() {
+            if let Some(index) = &mut self.search_index {
+                let _ = index.add_document(&path, "");
+            }
             self.rebuild_graph();
             self.request_open_document(path);
         }
@@ -379,6 +416,8 @@ impl EditorApp {
                             self.open_document = Some(to.join(relative));
                         }
                     }
+                    self.rebuild_search_index();
+                    self.panels.search.invalidate();
                     self.rebuild_graph();
                 }
                 Event::EntryDeleted(path) => {
@@ -389,6 +428,8 @@ impl EditorApp {
                     if deleted_open {
                         self.close_document_now();
                     }
+                    self.rebuild_search_index();
+                    self.panels.search.invalidate();
                     self.rebuild_graph();
                 }
                 Event::DocumentSaved(_path) => {
@@ -399,6 +440,87 @@ impl EditorApp {
                     ctx.set_visuals(self.settings.theme.visuals());
                 }
             }
+        }
+    }
+
+    /// Poll the background watcher and apply any events that arrived.
+    pub(crate) fn poll_watcher(&mut self) {
+        let mut events = Vec::new();
+        if let Some(watcher) = &self.watcher {
+            while let Some(event) = watcher.try_recv() {
+                events.push(event);
+            }
+        }
+        for event in events {
+            self.apply_watch_event(event);
+        }
+    }
+
+    /// Apply a single filesystem change without clobbering a dirty buffer.
+    fn apply_watch_event(&mut self, event: WatchEvent) {
+        match event {
+            WatchEvent::Created(path) | WatchEvent::Modified(path) => {
+                self.index_path(&path);
+                if self.open_document.as_deref() == Some(path.as_path()) {
+                    if self.dirty {
+                        self.external_change = Some(format!(
+                            "{} changed on disk; your unsaved edits were kept.",
+                            path.display()
+                        ));
+                    } else if let Some(vault) = &self.vault
+                        && let Ok(content) = vault.read(&path)
+                        && content != self.document_content
+                    {
+                        self.document_content = content;
+                    }
+                }
+                self.rebuild_graph();
+                self.panels.search.invalidate();
+            }
+            WatchEvent::Deleted(path) => {
+                if let Some(index) = &mut self.search_index {
+                    let _ = index.remove_document(&path);
+                }
+                let deleted_open = self
+                    .open_document
+                    .as_deref()
+                    .is_some_and(|open| open == path || open.starts_with(&path));
+                if deleted_open {
+                    if self.dirty {
+                        self.external_change = Some(format!(
+                            "{} was deleted on disk; your buffer was kept.",
+                            path.display()
+                        ));
+                    } else {
+                        self.close_document_now();
+                    }
+                }
+                self.rebuild_graph();
+                self.panels.search.invalidate();
+            }
+            WatchEvent::Renamed(from, to) => {
+                self.rebuild_search_index();
+                self.panels.search.invalidate();
+                if let Some(open) = self.open_document.clone() {
+                    if open == from {
+                        self.open_document = Some(to);
+                    } else if let Ok(relative) = open.strip_prefix(&from) {
+                        self.open_document = Some(to.join(relative));
+                    }
+                }
+                self.rebuild_graph();
+            }
+        }
+    }
+
+    /// Index a single file into the search index, ignoring read failures.
+    fn index_path(&mut self, path: &Path) {
+        let Some(vault) = &self.vault else { return };
+        let Ok(content) = vault.read(path) else {
+            return;
+        };
+        if let Some(index) = &mut self.search_index {
+            let _ = index.add_document(path, &content);
         }
     }
 
@@ -440,6 +562,13 @@ impl EditorApp {
         }
         if input.key_pressed(Key::N) {
             self.new_note();
+            ctx.request_repaint();
+        }
+        if input.key_pressed(Key::F) {
+            self.search_open = !self.search_open;
+            if self.search_open {
+                self.panels.search.focus();
+            }
             ctx.request_repaint();
         }
         if input.key_pressed(Key::P) {
@@ -683,6 +812,7 @@ impl EditorApp {
                 ui.label("  Ctrl+S - Save document");
                 ui.label("  Ctrl+O - Open vault");
                 ui.label("  Ctrl+N - New note");
+                ui.label("  Ctrl+F - Search notes");
                 ui.label("  Ctrl+P - Command palette");
                 ui.label("  Ctrl+G - Toggle graph");
                 ui.label("  Ctrl+W - Close note");
@@ -733,6 +863,9 @@ impl eframe::App for EditorApp {
 
         // Auto-save check.
         self.maybe_auto_save();
+
+        // Apply filesystem changes detected in the background.
+        self.poll_watcher();
 
         // Top menu bar.
         TopBottomPanel::top("menu_bar").show(ctx, |ui| {
@@ -788,6 +921,17 @@ impl eframe::App for EditorApp {
                 });
                 ui.menu_button("View", |ui| {
                     use crate::theme::ThemeMode;
+                    if ui
+                        .selectable_label(self.search_open, "Search\tCtrl+F")
+                        .clicked()
+                    {
+                        self.search_open = !self.search_open;
+                        if self.search_open {
+                            self.panels.search.focus();
+                        }
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     for (label, mode) in [
                         ("System", ThemeMode::System),
                         ("Light", ThemeMode::Light),
@@ -816,6 +960,56 @@ impl eframe::App for EditorApp {
                 &mut self.event_bus,
             );
         });
+
+        // Conflict banner: a file changed on disk while the buffer was dirty.
+        let mut dismiss_notice = false;
+        if let Some(notice) = &self.external_change {
+            TopBottomPanel::top("external_change_banner").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.colored_label(egui::Color32::from_rgb(220, 140, 50), notice);
+                    if ui.button("Dismiss").clicked() {
+                        dismiss_notice = true;
+                    }
+                });
+            });
+        }
+        if dismiss_notice {
+            self.external_change = None;
+        }
+
+        // Bottom search panel.
+        if self.search_open {
+            let mut close_search = false;
+            TopBottomPanel::bottom("search_panel")
+                .resizable(true)
+                .default_height(220.0)
+                .show(ctx, |ui| {
+                    close_search = self.panels.search.show(
+                        ui,
+                        self.search_index.as_ref(),
+                        &mut self.event_bus,
+                    );
+                });
+            if close_search {
+                self.search_open = false;
+                self.panels.search.invalidate();
+            }
+        }
+
+        // Bottom backlinks panel for the open note.
+        if self.open_document.is_some() {
+            TopBottomPanel::bottom("backlinks_panel")
+                .resizable(true)
+                .default_height(110.0)
+                .show(ctx, |ui| {
+                    self.panels.backlinks.show(
+                        ui,
+                        &self.graph,
+                        self.open_document.as_deref(),
+                        &mut self.event_bus,
+                    );
+                });
+        }
 
         // Central panel: editor split or graph view depending on active panel.
         let mut graph_moved = false;

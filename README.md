@@ -4,10 +4,9 @@ A local-first markdown editor written in Rust. Desktop UI is built with
 **eframe/egui**; the storage, parsing, graph, search and export logic lives in
 a separate, GUI-independent core crate.
 
-> **Status:** usable for daily note-taking. Nested file tree, live Markdown
-> preview, settings/state persistence, and graph layout persistence work. The
-> link graph still needs edges, and backlinks/search are not wired to the GUI
-> yet — see [PLAN.md](PLAN.md) for the remaining milestones.
+> **Status:** usable for daily note-taking. Wikilinks build a live link graph,
+> backlinks and full-text search are wired into the UI, and a background watcher
+> picks up external edits. See [PLAN.md](PLAN.md) for the remaining polish work.
 
 ## Features
 
@@ -19,13 +18,22 @@ a separate, GUI-independent core crate.
   as a metadata card. Drag the divider to resize editor and preview.
 - **File tree:** nested folders with expand/collapse and a context menu for
   new notes/folders, rename, delete, and reveal-in-file-manager.
-- **Graph:** draggable node layout persisted to `<vault>/.editor/layout.json`
-  (edges and backlinks are the next milestone).
+- **Graph:** a force-directed graph whose edges are wikilinks, with
+  degree-sized nodes, arrowheads, hover tooltips, and draggable layout
+  persisted to `<vault>/.editor/layout.json`. Links to missing notes appear as
+  grey placeholders.
+- **Backlinks:** a panel listing notes that link to the open document;
+  clicking one opens it.
+- **Search:** full-text vault search (tantivy) with snippets and arrow-key /
+  Enter navigation.
+- **Live updates:** a background watcher applies external edits to the graph
+  and index, reloads clean buffers, and shows a conflict banner instead of
+  overwriting unsaved edits.
 - **Export:** a note to standalone HTML, or the whole vault to a bundle.
 - **Shortcuts:** `Ctrl/Cmd+S` save, `Ctrl/Cmd+O` open vault, `Ctrl/Cmd+N` new
-  note, `Ctrl/Cmd+P` command palette, `Ctrl/Cmd+G` graph, `Ctrl/Cmd+W` close
-  note, `Ctrl/Cmd+Tab` next note, `Ctrl/Cmd+Shift+P` export note,
-  `Ctrl/Cmd+Shift+B` export vault.
+  note, `Ctrl/Cmd+F` search, `Ctrl/Cmd+P` command palette, `Ctrl/Cmd+G` graph,
+  `Ctrl/Cmd+W` close note, `Ctrl/Cmd+Tab` next note,
+  `Ctrl/Cmd+Shift+P` export note, `Ctrl/Cmd+Shift+B` export vault.
 
 ## Workspace
 
@@ -80,8 +88,11 @@ tags = ["rust", "notes"]
 # Body
 ```
 
-Wikilinks (`[[other-note]]`) are parsed into a link graph used by the graph
-panel and backlink queries.
+Wikilinks (`[[other-note]]`, `[[path/to/note|alias]]`) become edges in the link
+graph. Targets resolve as an exact relative path, with `.md` appended, then by
+case-insensitive path or file stem, and finally from the vault root. Links whose
+target does not exist yet are kept as grey placeholder nodes and turn into real
+notes when the file is created.
 
 ## Development
 
@@ -119,7 +130,7 @@ crates/
       theme.rs         colour/visual tokens
       settings.rs      user preferences
       event_bus.rs     cross-panel event dispatch
-      panels/          file tree, editor split, preview, graph, search
+      panels/          file tree, editor split, preview, graph, search, backlinks
       widgets/         markdown editor, syntax highlighting, graph canvas
   editor-cli/
     src/main.rs        clap-based CLI

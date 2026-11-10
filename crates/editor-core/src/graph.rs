@@ -12,6 +12,10 @@ pub struct GraphNode {
     pub path: PathBuf,
     pub title: String,
     pub position: Option<Pos2>,
+    /// `false` for placeholder nodes created by links to files that do not
+    /// exist yet. They are drawn differently and disappear once the file is
+    /// created.
+    pub resolved: bool,
 }
 
 /// An edge in the link graph representing a wikilink from one file to another.
@@ -51,11 +55,23 @@ impl LinkGraph {
             path: path.clone(),
             title,
             position: None,
+            resolved: true,
         });
         let node = self.nodes.get_mut(id).expect("node was just inserted");
         node.id = id;
         self.path_to_node.insert(path, id);
         id
+    }
+
+    /// Mark a node as resolved (backed by a real file) or unresolved (a
+    /// placeholder for a missing link target).
+    pub fn set_resolved(&mut self, id: NodeId, resolved: bool) -> bool {
+        if let Some(node) = self.nodes.get_mut(id) {
+            node.resolved = resolved;
+            true
+        } else {
+            false
+        }
     }
 
     /// Get a node by ID.
