@@ -15,7 +15,7 @@ exists today**, **what is broken**, and **the order in which to fix it**.
 | Workspace | 3 crates: `editor-core`, `editor-gui`, `editor-cli` |
 | Size | ~7,800 lines of Rust |
 | Build | `cargo check --workspace --all-targets` passes |
-| Tests | Core: 73 unit + 13 integration pass. GUI: 26 unit + 5 integration pass |
+| Tests | Core: 77 unit + 13 integration pass. GUI: 30 unit + 5 integration pass |
 | Known failure | none |
 | Git | Initialized; M0, M1, and M2 milestones committed |
 | Docs | `README.md` matches the current feature set; M3 work is listed below |
@@ -263,7 +263,9 @@ Goal: deliver the Obsidian-like features that make this project distinct.
   - [x] Persist and reload node positions across sessions.
   - [x] Draw labels outside nodes, radius by degree, hover tooltip, edge
         arrows, click-empty-to-deselect.
-  - [ ] Optional: color nodes by `cluster_graph`.
+  - [x] Optional: color nodes by `cluster_graph`.
+  - [x] Clicking an unresolved placeholder creates the missing note and opens
+        it (path-safety checked).
 - [x] **Backlinks**
   - [x] New `panels/backlinks.rs` showing `GraphQuery::backlinks` for the open
         note; clicking opens the source note.
@@ -272,6 +274,8 @@ Goal: deliver the Obsidian-like features that make this project distinct.
   - [x] Render `SearchPanel` (dock or tab) with results, snippets, and
         keyboard navigation.
   - [x] Replace the `snippet = title` stub in `index.rs` with a real snippet.
+  - [x] Index frontmatter tags and support `#tag` filters, including tag-only
+        searches.
 - [x] **Watcher (optional but recommended)**
   - [x] Run `Watcher` on a background thread; poll the channel each frame.
   - [x] Apply events through `GraphUpdater` and `SearchIndex`.

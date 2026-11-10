@@ -454,6 +454,48 @@ mod tests {
     }
 
     #[test]
+    fn updater_resolves_placeholder_when_file_appears() {
+        let dir = tempdir().unwrap();
+        let vault = TestVault {
+            dir: dir.path().to_path_buf(),
+        };
+
+        std::fs::write(dir.path().join("a.md"), "# A\n[[Missing Note]]").unwrap();
+
+        let mut graph = LinkGraph::new();
+        {
+            let mut updater = GraphUpdater::new(&mut graph, &vault);
+            updater.rebuild().unwrap();
+        }
+
+        let missing = graph
+            .node_by_path(Path::new("Missing Note.md"))
+            .expect("placeholder node exists");
+        assert!(!graph.node(missing).unwrap().resolved);
+
+        std::fs::write(dir.path().join("Missing Note.md"), "# Missing").unwrap();
+        {
+            let mut updater = GraphUpdater::new(&mut graph, &vault);
+            updater
+                .apply_event(&WatchEvent::Created(PathBuf::from("Missing Note.md")))
+                .unwrap();
+        }
+
+        let missing = graph
+            .node_by_path(Path::new("Missing Note.md"))
+            .expect("placeholder became a real node");
+        assert!(graph.node(missing).unwrap().resolved);
+
+        let a = graph.node_by_path(Path::new("a.md")).unwrap();
+        assert!(
+            graph
+                .outgoing_edges(a)
+                .iter()
+                .any(|edge| edge.target == missing)
+        );
+    }
+
+    #[test]
     fn updater_deduplicates_duplicate_links_with_weight() {
         let dir = tempdir().unwrap();
         let vault = TestVault {

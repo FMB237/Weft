@@ -12,6 +12,7 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 
 use crate::event_bus::{Event, EventBus};
+use editor_core::clustering::cluster_graph;
 use editor_core::graph::{GraphNode, LinkGraph, NodeId};
 use editor_core::layout::{LayoutParams, layout_graph};
 use editor_core::layout_store::LayoutStore;
@@ -49,6 +50,17 @@ const OPEN_DOC_STROKE_WIDTH: f32 = 3.0;
 const OPEN_DOC_STROKE_COLOR: Color32 = Color32::from_rgb(255, 215, 0);
 /// Maximum number of characters shown in a node label.
 const LABEL_MAX_CHARS: usize = 22;
+/// Palette used when node colouring by cluster is enabled.
+const CLUSTER_COLORS: [Color32; 8] = [
+    Color32::from_rgb(64, 132, 196),
+    Color32::from_rgb(214, 122, 74),
+    Color32::from_rgb(98, 172, 120),
+    Color32::from_rgb(176, 118, 196),
+    Color32::from_rgb(206, 178, 74),
+    Color32::from_rgb(76, 178, 184),
+    Color32::from_rgb(196, 98, 132),
+    Color32::from_rgb(136, 148, 206),
+];
 
 /// A zoomable, pannable graph canvas.
 #[derive(Debug)]
@@ -59,10 +71,16 @@ pub struct GraphCanvas {
     pub zoom: f32,
     /// Currently selected node, if any.
     pub selected: Option<NodeId>,
+    /// Whether nodes are tinted by their detected community.
+    pub color_by_cluster: bool,
     /// Cached force-directed layout positions, keyed by node id.
     layout: Option<Vec<(NodeId, Pos2)>>,
     /// Hash of node/edge identity the cached layout was computed for.
     layout_signature: u64,
+    /// Cached cluster colours, keyed by node id.
+    cluster_colors: Option<HashMap<NodeId, Color32>>,
+    /// Hash of node/edge identity the cached colours were computed for.
+    cluster_signature: u64,
     /// Whether the initial centering pan has been applied.
     centered: bool,
 }
@@ -74,15 +92,20 @@ impl GraphCanvas {
             pan: Vec2::ZERO,
             zoom: 1.0,
             selected: None,
+            color_by_cluster: true,
             layout: None,
             layout_signature: 0,
+            cluster_colors: None,
+            cluster_signature: 0,
             centered: false,
         }
     }
 
     /// Reset view state and force a new layout, e.g. when the vault changes.
     pub fn reset(&mut self) {
+        let color_by_cluster = self.color_by_cluster;
         *self = Self::new();
+        self.color_by_cluster = color_by_cluster;
     }
 
     /// Map a graph-space position to screen space.
@@ -113,6 +136,36 @@ impl GraphCanvas {
         let layout = layout_graph(graph, &LayoutParams::default());
         self.layout = Some(layout.positions);
         self.layout_signature = signature;
+    }
+
+    /// Recompute cluster colours when the graph identity changes.
+    ///
+    /// Isolated nodes and graphs with a single community keep the default
+    /// fill; only multi-node communities get palette colours.
+    fn ensure_cluster_colors(&mut self, graph: &LinkGraph) {
+        let signature = Self::graph_signature(graph);
+        if self.cluster_colors.is_some() && self.cluster_signature == signature {
+            return;
+        }
+
+        let clusters = cluster_graph(graph);
+        let mut colors = HashMap::new();
+        if clusters.len() > 1 {
+            let mut palette_index = 0;
+            for cluster in &clusters {
+                if cluster.nodes.len() < 2 {
+                    continue;
+                }
+                let color = CLUSTER_COLORS[palette_index % CLUSTER_COLORS.len()];
+                palette_index += 1;
+                for node in &cluster.nodes {
+                    colors.insert(*node, color);
+                }
+            }
+        }
+
+        self.cluster_colors = Some(colors);
+        self.cluster_signature = signature;
     }
 
     /// Identity hash for the graph, so the layout recomputes when nodes or
@@ -162,6 +215,7 @@ impl GraphCanvas {
         let painter = ui.painter();
 
         self.ensure_layout(graph);
+        self.ensure_cluster_colors(graph);
 
         // Center the graph in the viewport on first show.
         if !self.centered
@@ -264,10 +318,15 @@ impl GraphCanvas {
             let is_selected = self.selected == Some(node_id);
             let fill = if is_selected {
                 SELECTED_FILL
-            } else if node.resolved {
-                NODE_FILL
-            } else {
+            } else if !node.resolved {
                 PLACEHOLDER_FILL
+            } else if self.color_by_cluster {
+                self.cluster_colors
+                    .as_ref()
+                    .and_then(|colors| colors.get(&node_id).copied())
+                    .unwrap_or(NODE_FILL)
+            } else {
+                NODE_FILL
             };
             painter.circle_filled(screen_pos, radius, fill);
             painter.circle_stroke(screen_pos, radius, NODE_STROKE);
@@ -325,7 +384,7 @@ impl GraphCanvas {
                     if !node.resolved {
                         ui.colored_label(
                             egui::Color32::from_rgb(200, 160, 90),
-                            "Missing note — click to create it later",
+                            "Missing note — click to create it",
                         );
                     }
                 },
@@ -397,7 +456,12 @@ impl GraphCanvas {
                 Some(id) => {
                     self.selected = Some(id);
                     if let Some(node) = graph.node(id) {
-                        event_bus.publish(Event::NodeSelected(node.path.clone()));
+                        let event = if node.resolved {
+                            Event::NodeSelected(node.path.clone())
+                        } else {
+                            Event::CreateNote(node.path.clone())
+                        };
+                        event_bus.publish(event);
                     }
                 }
                 None => self.selected = None,
@@ -458,6 +522,11 @@ fn node_label(node: &GraphNode) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::many_single_char_names,
+        reason = "graph fixtures use a, b, c for nodes"
+    )]
+
     use super::*;
     use std::path::PathBuf;
 
@@ -489,5 +558,32 @@ mod tests {
         let id = graph.add_node(PathBuf::from("notes/alpha.md"), String::new());
         let node = graph.node(id).expect("node exists").clone();
         assert_eq!(node_label(&node), "alpha");
+    }
+
+    #[test]
+    fn cluster_colors_group_connected_nodes_and_skip_isolated() {
+        let mut graph = LinkGraph::new();
+        let a = graph.add_node(PathBuf::from("a.md"), "A".into());
+        let b = graph.add_node(PathBuf::from("b.md"), "B".into());
+        let c = graph.add_node(PathBuf::from("c.md"), "C".into());
+        let d = graph.add_node(PathBuf::from("d.md"), "D".into());
+        let e = graph.add_node(PathBuf::from("e.md"), "E".into());
+        let isolated = graph.add_node(PathBuf::from("solo.md"), "Solo".into());
+        graph.add_edge(a, b, 1.0);
+        graph.add_edge(b, c, 1.0);
+        graph.add_edge(d, e, 1.0);
+
+        let mut canvas = GraphCanvas::new();
+        canvas.ensure_cluster_colors(&graph);
+        let colors = canvas
+            .cluster_colors
+            .as_ref()
+            .expect("cluster colours computed");
+
+        assert_eq!(colors.get(&a), colors.get(&b));
+        assert_eq!(colors.get(&b), colors.get(&c));
+        assert_eq!(colors.get(&d), colors.get(&e));
+        assert_ne!(colors.get(&a), colors.get(&d));
+        assert!(!colors.contains_key(&isolated));
     }
 }

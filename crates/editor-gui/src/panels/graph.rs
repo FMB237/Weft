@@ -30,7 +30,12 @@ impl GraphPanel {
         event_bus: &mut EventBus,
         selected_path: Option<&std::path::Path>,
     ) -> bool {
-        ui.heading("Graph View");
+        ui.horizontal(|ui| {
+            ui.heading("Graph View");
+            ui.separator();
+            ui.checkbox(&mut self.canvas.color_by_cluster, "Color by cluster")
+                .on_hover_text("Tint nodes by detected community");
+        });
         let response = self.canvas.show(ui, graph, layout_store, selected_path);
         self.canvas
             .handle_input(&response, ui.ctx(), graph, layout_store, event_bus)

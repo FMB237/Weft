@@ -13,6 +13,9 @@ use std::path::PathBuf;
 pub enum Event {
     /// A node/file was selected (e.g. clicked in file tree or graph).
     NodeSelected(PathBuf),
+    /// A missing note (unresolved graph placeholder) was clicked; create the
+    /// file at this vault-relative path and open it.
+    CreateNote(PathBuf),
     /// A document was opened for editing.
     NodeOpened(PathBuf),
     /// The link graph changed (nodes/edges added/removed).

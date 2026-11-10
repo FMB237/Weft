@@ -7,6 +7,37 @@ use crate::event_bus::{Event, EventBus};
 use editor_core::index::{SearchIndex, SearchOptions, SearchResult};
 use egui::{Key, TextEdit, Ui};
 
+/// A raw search box value split into free text and `#tag` filters.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ParsedQuery {
+    text: String,
+    tags: Vec<String>,
+}
+
+/// Split `foo #rust #notes` into `text = "foo"` and two tag filters.
+fn parse_query(input: &str) -> ParsedQuery {
+    let mut words = Vec::new();
+    let mut tags = Vec::new();
+
+    for token in input.split_whitespace() {
+        if let Some(tag) = token.strip_prefix('#') {
+            let tag = tag.trim_matches(|c: char| {
+                matches!(c, ',' | ';' | ':' | '!' | '?' | '.' | '(' | ')' | '[' | ']')
+            });
+            if !tag.is_empty() {
+                tags.push(tag.to_string());
+                continue;
+            }
+        }
+        words.push(token.to_string());
+    }
+
+    ParsedQuery {
+        text: words.join(" "),
+        tags,
+    }
+}
+
 #[derive(Debug)]
 pub struct SearchPanel {
     query: String,
@@ -63,7 +94,7 @@ impl SearchPanel {
 
         let response = ui.add(
             TextEdit::singleline(&mut self.query)
-                .hint_text("Search notes…")
+                .hint_text("Search notes… (#tag to filter)")
                 .desired_width(f32::INFINITY),
         );
         if self.focus_requested {
@@ -77,10 +108,14 @@ impl SearchPanel {
             self.selected = 0;
             self.error = None;
 
-            let trimmed = self.query.trim();
-            if !trimmed.is_empty() {
+            let parsed = parse_query(self.query.trim());
+            if !parsed.text.is_empty() || !parsed.tags.is_empty() {
+                let options = SearchOptions {
+                    limit: 20,
+                    tags: parsed.tags,
+                };
                 match index {
-                    Some(index) => match index.search(trimmed, &SearchOptions::default()) {
+                    Some(index) => match index.search(&parsed.text, &options) {
                         Ok(results) => self.results = results,
                         Err(error) => self.error = Some(error.to_string()),
                     },
@@ -94,7 +129,8 @@ impl SearchPanel {
         }
 
         if self.results.is_empty() {
-            if !self.query.trim().is_empty() && self.error.is_none() {
+            let parsed = parse_query(self.query.trim());
+            if (!parsed.text.is_empty() || !parsed.tags.is_empty()) && self.error.is_none() {
                 ui.label("No matches.");
             }
             return close;
@@ -118,7 +154,20 @@ impl SearchPanel {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (index, result) in self.results.iter().enumerate() {
-                    let label = format!("{}\n{}", result.title, result.snippet);
+                    let tags = if result.tags.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            "\n{}",
+                            result
+                                .tags
+                                .iter()
+                                .map(|tag| format!("#{tag}"))
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        )
+                    };
+                    let label = format!("{}{}\n{}", result.title, tags, result.snippet);
                     let response = ui.selectable_label(index == self.selected, label);
                     if response.clicked() {
                         self.selected = index;
@@ -140,5 +189,20 @@ mod tests {
         let panel = SearchPanel::new();
         assert!(panel.query.is_empty());
         assert!(panel.results.is_empty());
+    }
+
+    #[test]
+    fn parse_query_separates_tags_and_text() {
+        let parsed = parse_query("roadmap #Rust, #notes");
+        assert_eq!(parsed.text, "roadmap");
+        assert_eq!(parsed.tags, vec!["Rust", "notes"]);
+    }
+
+    #[test]
+    fn parse_query_keeps_standalone_hash_and_supports_tag_only() {
+        assert_eq!(parse_query("# ").text, "#");
+        let parsed = parse_query("#project");
+        assert!(parsed.text.is_empty());
+        assert_eq!(parsed.tags, vec!["project"]);
     }
 }

@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use tantivy::collector::TopDocs;
-use tantivy::query::QueryParser;
-use tantivy::schema::{Field, STORED, STRING, Schema, TEXT};
-use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, doc};
+use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, TermQuery};
+use tantivy::schema::{Field, IndexRecordOption, STORED, STRING, Schema, TEXT};
+use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term, doc};
 
 /// A search result from the full-text index.
 #[derive(Debug, Clone)]
@@ -11,6 +11,8 @@ pub struct SearchResult {
     pub path: PathBuf,
     pub title: String,
     pub snippet: String,
+    /// Normalized frontmatter tags for this note.
+    pub tags: Vec<String>,
     pub score: f32,
 }
 
@@ -43,6 +45,7 @@ struct SchemaFields {
     path: Field,
     title: Field,
     body: Field,
+    tags: Field,
 }
 
 /// Wrapper around the tantivy search index.
@@ -60,6 +63,7 @@ impl SearchIndex {
         let path = schema_builder.add_text_field("path", STRING | STORED);
         let title = schema_builder.add_text_field("title", TEXT | STORED);
         let body = schema_builder.add_text_field("body", TEXT | STORED);
+        let tags = schema_builder.add_text_field("tags", STRING | STORED);
         let schema = schema_builder.build();
 
         let index = Index::create_in_ram(schema);
@@ -71,7 +75,12 @@ impl SearchIndex {
 
         Ok(Self {
             index,
-            schema_fields: SchemaFields { path, title, body },
+            schema_fields: SchemaFields {
+                path,
+                title,
+                body,
+                tags,
+            },
             reader,
             writer,
         })
@@ -98,11 +107,23 @@ impl SearchIndex {
         // Index the body only: frontmatter keys should not pollute matches.
         let (_, body) = crate::parser::split_frontmatter(content);
 
-        self.writer.add_document(doc!(
+        let tags: Vec<String> = frontmatter
+            .tags
+            .iter()
+            .map(|tag| normalize_tag(tag))
+            .filter(|tag| !tag.is_empty())
+            .collect();
+
+        let mut document = doc!(
             self.schema_fields.path => path.to_str().unwrap_or(""),
             self.schema_fields.title => title,
             self.schema_fields.body => body.to_string()
-        ))?;
+        );
+        for tag in &tags {
+            document.add_text(self.schema_fields.tags, tag);
+        }
+
+        self.writer.add_document(document)?;
         self.writer.commit()?;
         self.reader.reload()?;
         Ok(())
@@ -119,19 +140,38 @@ impl SearchIndex {
     }
 
     /// Search the index using tantivy full-text search.
+    ///
+    /// A query may be text, a set of tag filters, or both. Tags are matched
+    /// exactly (case-insensitively) against normalized frontmatter tags.
     pub fn search(&self, query: &str, opts: &SearchOptions) -> tantivy::Result<Vec<SearchResult>> {
         let query = sanitize_query(query);
-        if query.is_empty() {
+
+        let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+        if !query.is_empty() {
+            let query_parser = QueryParser::for_index(
+                &self.index,
+                vec![self.schema_fields.body, self.schema_fields.title],
+            );
+            clauses.push((Occur::Must, Box::new(query_parser.parse_query(&query)?)));
+        }
+        for tag in &opts.tags {
+            let tag = normalize_tag(tag);
+            if tag.is_empty() {
+                continue;
+            }
+            let term = Term::from_field_text(self.schema_fields.tags, &tag);
+            clauses.push((
+                Occur::Must,
+                Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
+            ));
+        }
+
+        if clauses.is_empty() {
             return Ok(Vec::new());
         }
 
         let searcher = self.reader.searcher();
-
-        let query_parser = QueryParser::for_index(
-            &self.index,
-            vec![self.schema_fields.body, self.schema_fields.title],
-        );
-        let tantivy_query = query_parser.parse_query(&query)?;
+        let tantivy_query = BooleanQuery::new(clauses);
 
         let top_docs = searcher.search(&tantivy_query, &TopDocs::with_limit(opts.limit))?;
 
@@ -150,12 +190,18 @@ impl SearchIndex {
                 .get_first(self.schema_fields.body)
                 .and_then(|v| v.as_text())
                 .unwrap_or("");
+            let tags = doc
+                .get_all(self.schema_fields.tags)
+                .filter_map(|v| v.as_text())
+                .map(ToString::to_string)
+                .collect();
             let path = PathBuf::from(path_str);
 
             results.push(SearchResult {
                 path,
                 title: title.to_string(),
                 snippet: make_snippet(body, &query),
+                tags,
                 score,
             });
         }
@@ -190,6 +236,11 @@ fn sanitize_query(query: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
+}
+
+/// Normalize a frontmatter tag or search filter for exact matching.
+fn normalize_tag(tag: &str) -> String {
+    tag.trim().trim_start_matches('#').to_lowercase()
 }
 
 /// Build a short plain-text snippet around the first matching query term.
@@ -282,6 +333,64 @@ mod tests {
             .search("needle", &SearchOptions::default())
             .expect("search failed");
         assert_eq!(results[0].title, "Real Title");
+    }
+
+    #[test]
+    fn search_filters_by_frontmatter_tag() {
+        let mut idx = SearchIndex::new().expect("failed to create index");
+        idx.add_document(
+            Path::new("/notes/a.md"),
+            "---\ntags = [\"Rust\", \"notes\"]\n---\nshared word",
+        )
+        .expect("add document");
+        idx.add_document(
+            Path::new("/notes/b.md"),
+            "---\ntags = [\"other\"]\n---\nshared word",
+        )
+        .expect("add document");
+
+        let opts = SearchOptions {
+            limit: 10,
+            tags: vec!["rust".into()],
+        };
+        let results = idx.search("shared", &opts).expect("search failed");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, Path::new("/notes/a.md"));
+        assert_eq!(results[0].tags, vec!["rust", "notes"]);
+    }
+
+    #[test]
+    fn search_supports_tag_only_queries() {
+        let mut idx = SearchIndex::new().expect("failed to create index");
+        idx.add_document(Path::new("/a.md"), "---\ntags = [\"#project\"]\n---\nbody")
+            .expect("add document");
+        idx.add_document(Path::new("/b.md"), "---\ntags = [\"other\"]\n---\nbody")
+            .expect("add document");
+
+        let opts = SearchOptions {
+            limit: 10,
+            tags: vec!["project".into()],
+        };
+        let results = idx.search("", &opts).expect("search failed");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, Path::new("/a.md"));
+    }
+
+    #[test]
+    fn search_requires_text_and_tags_to_both_match() {
+        let mut idx = SearchIndex::new().expect("failed to create index");
+        idx.add_document(Path::new("/a.md"), "---\ntags = [\"rust\"]\n---\nneedle")
+            .expect("add document");
+        idx.add_document(Path::new("/b.md"), "---\ntags = [\"other\"]\n---\nneedle")
+            .expect("add document");
+
+        let opts = SearchOptions {
+            limit: 10,
+            tags: vec!["rust".into()],
+        };
+        let results = idx.search("needle", &opts).expect("search failed");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, Path::new("/a.md"));
     }
 
     #[test]

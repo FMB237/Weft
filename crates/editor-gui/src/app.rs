@@ -4,7 +4,7 @@
 // position, layout), theme, panels, and wiring between the GUI and
 //! editor-core.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use editor_core::export::{export_document, export_vault_bundle};
 use editor_core::graph::LinkGraph;
@@ -351,6 +351,33 @@ impl EditorApp {
         }
     }
 
+    /// Create a missing note at a vault-relative path (clicked graph
+    /// placeholder), index it, and open it.
+    pub(crate) fn create_note_at(&mut self, path: &Path) {
+        let Some(vault) = &self.vault else { return };
+        if !is_safe_note_path(path) {
+            self.external_change = Some(format!(
+                "Refusing to create a note outside the vault: {}",
+                path.display()
+            ));
+            return;
+        }
+
+        // Clicking a placeholder that now exists should just open it.
+        if vault.read(path).is_ok() {
+            self.request_open_document(path.to_path_buf());
+            return;
+        }
+
+        if vault.write(path, "").is_ok() {
+            if let Some(index) = &mut self.search_index {
+                let _ = index.add_document(path, "");
+            }
+            self.rebuild_graph();
+            self.request_open_document(path.to_path_buf());
+        }
+    }
+
     /// Create a new note in the vault root and open it.
     pub(crate) fn new_note(&mut self) {
         let Some(vault) = &self.vault else { return };
@@ -405,6 +432,9 @@ impl EditorApp {
                 Event::NodeSelected(path) | Event::NodeOpened(path) => {
                     self.request_open_document(path);
                 }
+                Event::CreateNote(path) => {
+                    self.create_note_at(&path);
+                }
                 Event::GraphChanged | Event::VaultChanged => {
                     self.rebuild_graph();
                 }
@@ -458,6 +488,7 @@ impl EditorApp {
 
     /// Apply a single filesystem change without clobbering a dirty buffer.
     fn apply_watch_event(&mut self, event: WatchEvent) {
+        self.apply_graph_event(&event);
         match event {
             WatchEvent::Created(path) | WatchEvent::Modified(path) => {
                 self.index_path(&path);
@@ -474,7 +505,6 @@ impl EditorApp {
                         self.document_content = content;
                     }
                 }
-                self.rebuild_graph();
                 self.panels.search.invalidate();
             }
             WatchEvent::Deleted(path) => {
@@ -495,7 +525,6 @@ impl EditorApp {
                         self.close_document_now();
                     }
                 }
-                self.rebuild_graph();
                 self.panels.search.invalidate();
             }
             WatchEvent::Renamed(from, to) => {
@@ -508,8 +537,22 @@ impl EditorApp {
                         self.open_document = Some(to.join(relative));
                     }
                 }
-                self.rebuild_graph();
             }
+        }
+    }
+
+    /// Keep the graph in sync with a filesystem event.
+    ///
+    /// Created/modified files are applied incrementally through
+    /// [`GraphUpdater`]; deletions and renames rebuild so links from other
+    /// notes fall back to unresolved placeholders.
+    fn apply_graph_event(&mut self, event: &WatchEvent) {
+        if matches!(event, WatchEvent::Created(_) | WatchEvent::Modified(_)) {
+            let Some(vault) = &self.vault else { return };
+            let mut updater = GraphUpdater::new(&mut self.graph, vault);
+            let _ = updater.apply_event(event);
+        } else {
+            self.rebuild_graph();
         }
     }
 
@@ -1114,6 +1157,29 @@ enum PendingAction {
     Quit,
 }
 
+/// Whether `path` is a normal, non-hidden markdown path relative to the vault
+/// root. Used before creating a note from an unresolved graph link.
+fn is_safe_note_path(path: &Path) -> bool {
+    let mut has_normal_component = false;
+    for component in path.components() {
+        match component {
+            Component::Normal(name) => {
+                if name.to_string_lossy().starts_with('.') {
+                    return false;
+                }
+                has_normal_component = true;
+            }
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return false,
+        }
+    }
+
+    has_normal_component
+        && path.extension().is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
+        })
+}
+
 /// Build a non-colliding path `<dir>/<stem>[ n].<ext>` inside `vault`.
 fn unique_child_path(vault: &Vault, dir: &Path, stem: &str, ext: &str) -> PathBuf {
     for index in 0.. {
@@ -1158,6 +1224,20 @@ mod tests {
         assert_eq!(loaded.open_document, state.open_document);
         assert_eq!(loaded.active_panel, state.active_panel);
         assert!((loaded.editor_split_ratio - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn safe_note_paths_reject_escape_and_hidden_paths() {
+        assert!(is_safe_note_path(Path::new("Missing Note.md")));
+        assert!(is_safe_note_path(Path::new("sub/alpha.md")));
+        assert!(is_safe_note_path(Path::new("./sub/alpha.markdown")));
+
+        assert!(!is_safe_note_path(Path::new("../outside.md")));
+        assert!(!is_safe_note_path(Path::new("/etc/passwd.md")));
+        assert!(!is_safe_note_path(Path::new(".hidden/note.md")));
+        assert!(!is_safe_note_path(Path::new("sub/.note.md")));
+        assert!(!is_safe_note_path(Path::new("note.txt")));
+        assert!(!is_safe_note_path(Path::new("")));
     }
 
     #[test]

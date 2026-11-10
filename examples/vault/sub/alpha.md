@@ -1,3 +1,8 @@
+---
+title = "Projects/Alpha"
+tags = ["projects", "alpha"]
+---
+
 # Projects/Alpha
 
 Alpha project page.

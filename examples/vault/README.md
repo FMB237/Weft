@@ -1,3 +1,8 @@
+---
+title = "Welcome"
+tags = ["welcome", "example"]
+---
+
 # Welcome
 
 This is a sample vault for the Markdown Editor.

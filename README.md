@@ -19,13 +19,15 @@ a separate, GUI-independent core crate.
 - **File tree:** nested folders with expand/collapse and a context menu for
   new notes/folders, rename, delete, and reveal-in-file-manager.
 - **Graph:** a force-directed graph whose edges are wikilinks, with
-  degree-sized nodes, arrowheads, hover tooltips, and draggable layout
-  persisted to `<vault>/.editor/layout.json`. Links to missing notes appear as
-  grey placeholders.
+  degree-sized nodes, arrowheads, hover tooltips, community colouring
+  (toggleable), and draggable layout persisted to
+  `<vault>/.editor/layout.json`. Links to missing notes appear as grey
+  placeholders; clicking one creates and opens the note.
 - **Backlinks:** a panel listing notes that link to the open document;
   clicking one opens it.
 - **Search:** full-text vault search (tantivy) with snippets and arrow-key /
-  Enter navigation.
+  Enter navigation. Frontmatter tags are indexed; `#tag` narrows a search, and
+  a tag on its own lists every note carrying it.
 - **Live updates:** a background watcher applies external edits to the graph
   and index, reloads clean buffers, and shows a conflict banner instead of
   overwriting unsaved edits.

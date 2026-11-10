@@ -1,3 +1,8 @@
+---
+title = "Meeting Notes"
+tags = ["meetings", "roadmap"]
+---
+
 # Meeting Notes
 
 Discussed the roadmap for the Markdown Editor.
