@@ -74,6 +74,14 @@ fn bench_layout_graph(c: &mut Criterion) {
         });
     });
 
+    c.bench_function("layout_graph_500_nodes", |b| {
+        let graph = build_graph(500);
+        b.iter(|| {
+            let layout = layout_graph(&graph, &LayoutParams::default());
+            black_box(layout);
+        });
+    });
+
     c.bench_function("layout_graph_1000_nodes", |b| {
         let graph = build_graph(1000);
         b.iter(|| {

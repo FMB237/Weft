@@ -123,6 +123,40 @@ impl SettingsPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct MemoryStorage {
+        values: HashMap<String, String>,
+    }
+
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.values.get(key).cloned()
+        }
+
+        fn set_string(&mut self, key: &str, value: String) {
+            self.values.insert(key.to_owned(), value);
+        }
+
+        fn flush(&mut self) {}
+    }
+
+    #[test]
+    fn settings_round_trip_through_storage() {
+        let mut settings = Settings::default();
+        settings.theme.mode = ThemeMode::Light;
+        settings.font_size = 18.0;
+        settings.auto_save_interval_secs = 45;
+
+        let mut storage = MemoryStorage::default();
+        settings.save(&mut storage);
+
+        let loaded = Settings::load(Some(&storage));
+        assert_eq!(loaded.theme.mode, ThemeMode::Light);
+        assert!((loaded.font_size - 18.0).abs() < f32::EPSILON);
+        assert_eq!(loaded.auto_save_interval_secs, 45);
+    }
 
     #[test]
     fn settings_default() {

@@ -9,8 +9,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::event_bus::{Event, EventBus};
+use crate::theme::palette;
+use crate::widgets::chrome::{empty_state, section_header};
 use editor_core::vault::Vault;
-use egui::{Id, ScrollArea, Ui, Vec2};
+use egui::{Id, RichText, ScrollArea, Ui, Vec2};
 
 /// Height of a single file-tree row in points.
 const ITEM_HEIGHT: f32 = 20.0;
@@ -83,14 +85,23 @@ impl FileTreePanel {
         dirty: bool,
         event_bus: &mut EventBus,
     ) {
-        ui.heading("Files");
+        let palette = palette(ui.ctx());
+        section_header(ui, "Files");
 
         let Some(vault) = vault else {
-            ui.label("No vault open.");
-            ui.separator();
-            ui.label("Use File > Open Vault to open a vault.");
+            empty_state(
+                ui,
+                "No vault open",
+                "Use File > Open Vault to choose a folder of notes.",
+            );
             return;
         };
+
+        ui.label(
+            RichText::new(vault.config.name.clone())
+                .size(12.0)
+                .color(palette.text_muted),
+        );
 
         let (Ok(files), Ok(dirs)) = (vault.list_files(), vault.list_dirs()) else {
             ui.label("Failed to list vault files.");
@@ -105,21 +116,29 @@ impl FileTreePanel {
         let mut toggled_dir: Option<PathBuf> = None;
 
         ui.horizontal(|ui| {
-            if ui.small_button("+ Note").clicked() {
+            if ui.button("+ Note").on_hover_text("Create a note").clicked() {
                 action = Some(TreeAction::NewNote(PathBuf::new()));
             }
-            if ui.small_button("+ Folder").clicked() {
+            if ui
+                .button("+ Folder")
+                .on_hover_text("Create a folder")
+                .clicked()
+            {
                 action = Some(TreeAction::NewFolder(PathBuf::new()));
             }
         });
         ui.separator();
 
         if let Some(notice) = &self.notice {
-            ui.colored_label(egui::Color32::from_rgb(220, 140, 50), notice);
+            ui.colored_label(palette.warning, notice);
         }
 
         if rows.is_empty() {
-            ui.label("(empty vault)");
+            empty_state(
+                ui,
+                "This vault is empty",
+                "Create your first note with the + Note button.",
+            );
         } else {
             if self.scroll_to_active {
                 if let Some(path) = &self.active

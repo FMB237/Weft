@@ -4,10 +4,12 @@
 //! back to [`LayoutStore`] so they survive between sessions.
 
 use crate::event_bus::EventBus;
+use crate::theme::palette;
 use crate::widgets::GraphCanvas;
+use crate::widgets::chrome::{badge, section_header};
 use editor_core::graph::LinkGraph;
 use editor_core::layout_store::LayoutStore;
-use egui::Ui;
+use egui::{RichText, Ui};
 
 #[derive(Debug)]
 pub struct GraphPanel {
@@ -30,12 +32,27 @@ impl GraphPanel {
         event_bus: &mut EventBus,
         selected_path: Option<&std::path::Path>,
     ) -> bool {
+        let palette = palette(ui.ctx());
+        section_header(ui, "Graph");
         ui.horizontal(|ui| {
-            ui.heading("Graph View");
-            ui.separator();
-            ui.checkbox(&mut self.canvas.color_by_cluster, "Color by cluster")
+            ui.checkbox(&mut self.canvas.color_by_cluster, "Colour by cluster")
                 .on_hover_text("Tint nodes by detected community");
+            ui.separator();
+            badge(ui, &format!("{} nodes", graph.node_count()), palette.accent);
+            badge(
+                ui,
+                &format!("{} links", graph.edge_count()),
+                palette.text_muted,
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new("drag to pan · scroll to zoom")
+                        .size(11.0)
+                        .color(palette.text_muted),
+                );
+            });
         });
+        ui.add_space(2.0);
         let response = self.canvas.show(ui, graph, layout_store, selected_path);
         self.canvas
             .handle_input(&response, ui.ctx(), graph, layout_store, event_bus)

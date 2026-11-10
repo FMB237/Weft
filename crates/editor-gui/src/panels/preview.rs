@@ -3,9 +3,11 @@
 //! Renders the currently open document with `egui_commonmark`, and shows TOML
 //! frontmatter as a metadata card instead of raw body text.
 
+use crate::theme::palette;
+use crate::widgets::chrome::{badge, card, empty_state};
 use editor_core::document::Frontmatter;
 use editor_core::parser::{parse_frontmatter, split_frontmatter};
-use egui::Ui;
+use egui::{RichText, Ui};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use std::path::PathBuf;
 
@@ -23,24 +25,14 @@ impl PreviewPanel {
 
     /// Show the preview of the current document.
     pub fn show(&mut self, ui: &mut Ui, open_document: &Option<PathBuf>, document_content: &str) {
-        ui.heading("Preview");
-
-        let Some(path) = open_document.as_ref() else {
-            ui.label("No document open.");
-            ui.separator();
-            ui.label("Select a file from the sidebar to view its preview.");
+        if open_document.is_none() {
+            empty_state(
+                ui,
+                "Nothing to preview",
+                "Open a note and its rendered Markdown will appear here.",
+            );
             return;
-        };
-
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("untitled");
-        ui.horizontal(|ui| {
-            ui.heading(name);
-            ui.label("— preview");
-        });
-        ui.separator();
+        }
 
         let frontmatter = parse_frontmatter(document_content);
         let (_, body) = split_frontmatter(document_content);
@@ -68,27 +60,40 @@ fn has_frontmatter(frontmatter: &Frontmatter) -> bool {
 }
 
 fn show_frontmatter_card(ui: &mut Ui, frontmatter: &Frontmatter) {
-    egui::Frame::group(ui.style()).show(ui, |ui| {
+    let palette = palette(ui.ctx());
+    card(ui, |ui| {
         ui.set_width(ui.available_width());
         if let Some(title) = &frontmatter.title {
-            ui.heading(title);
+            ui.label(RichText::new(title).size(18.0).strong());
         }
         if !frontmatter.tags.is_empty() {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Tags:");
+                ui.label(RichText::new("Tags").color(palette.text_muted).size(11.0));
                 for tag in &frontmatter.tags {
-                    ui.label(egui::RichText::new(format!("#{tag}")).monospace());
+                    badge(ui, &format!("#{tag}"), palette.accent);
                 }
             });
         }
         if let Some(created) = &frontmatter.created {
-            ui.label(format!("Created: {created}"));
+            ui.label(
+                RichText::new(format!("Created {created}"))
+                    .size(11.0)
+                    .color(palette.text_muted),
+            );
         }
         if let Some(modified) = &frontmatter.modified {
-            ui.label(format!("Modified: {modified}"));
+            ui.label(
+                RichText::new(format!("Modified {modified}"))
+                    .size(11.0)
+                    .color(palette.text_muted),
+            );
         }
         for (key, value) in &frontmatter.other {
-            ui.label(format!("{key}: {value}"));
+            ui.label(
+                RichText::new(format!("{key}: {value}"))
+                    .size(11.0)
+                    .color(palette.text_muted),
+            );
         }
     });
 }

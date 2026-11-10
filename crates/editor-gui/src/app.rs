@@ -20,6 +20,8 @@ use egui::{CentralPanel, Key, SidePanel, TopBottomPanel};
 use crate::event_bus::{Event, EventBus};
 use crate::panels::{PanelId, Panels};
 use crate::settings::{Settings, SettingsPanel};
+use crate::theme::palette;
+use crate::widgets::chrome::{badge, icon_button, status_bar, tab_bar, toast};
 use editor_core::plugins::{PluginEvent, PluginManager};
 
 /// Persisted application state saved between sessions.
@@ -127,6 +129,8 @@ pub struct EditorApp {
     search_open: bool,
     /// Notice shown when a file changed on disk while the buffer was dirty.
     external_change: Option<String>,
+    /// Whether the currently applied style is dark, for system-theme tracking.
+    theme_is_dark: bool,
 }
 
 impl std::fmt::Debug for EditorApp {
@@ -144,7 +148,9 @@ impl EditorApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let state = AppState::load(cc.storage);
         let settings = Settings::load(cc.storage);
-        cc.egui_ctx.set_visuals(settings.theme.visuals());
+        crate::theme::install_fonts(&cc.egui_ctx);
+        settings.theme.apply(&cc.egui_ctx);
+        let theme_is_dark = settings.theme.is_dark(&cc.egui_ctx);
 
         let mut panels = Panels::new();
         panels.set_active(state.active_panel);
@@ -177,6 +183,7 @@ impl EditorApp {
             watcher: None,
             search_open: false,
             external_change: None,
+            theme_is_dark,
         };
 
         // Re-open the last vault and document, if they still exist.
@@ -467,7 +474,8 @@ impl EditorApp {
                     self.dirty = false;
                 }
                 Event::ThemeChanged => {
-                    ctx.set_visuals(self.settings.theme.visuals());
+                    self.settings.theme.apply(ctx);
+                    self.theme_is_dark = self.settings.theme.is_dark(ctx);
                 }
             }
         }
@@ -791,7 +799,8 @@ impl EditorApp {
                 let changed = self.settings_panel.show(ui, &mut self.settings);
                 if changed {
                     // Apply theme immediately.
-                    ctx.set_visuals(self.settings.theme.visuals());
+                    self.settings.theme.apply(ctx);
+                    self.theme_is_dark = self.settings.theme.is_dark(ctx);
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
@@ -904,6 +913,13 @@ impl eframe::App for EditorApp {
         // Keyboard shortcuts (handled before panels so they take priority).
         self.handle_keyboard(ctx);
 
+        // Follow the OS theme when the user picked System.
+        let want_dark = self.settings.theme.is_dark(ctx);
+        if want_dark != self.theme_is_dark {
+            self.theme_is_dark = want_dark;
+            self.settings.theme.apply(ctx);
+        }
+
         // Auto-save check.
         self.maybe_auto_save();
 
@@ -985,39 +1001,110 @@ impl eframe::App for EditorApp {
                             .clicked()
                         {
                             self.settings.theme.mode = mode;
-                            ctx.set_visuals(self.settings.theme.visuals());
+                            self.settings.theme.apply(ctx);
+                            self.theme_is_dark = self.settings.theme.is_dark(ctx);
                             ui.close_menu();
                         }
                     }
                 });
             });
-        });
 
-        // Left side panel: file tree.
-        SidePanel::left("file_tree").show(ctx, |ui| {
-            self.panels.file_tree.show(
-                ui,
-                self.vault.as_mut(),
-                self.open_document.as_deref(),
-                self.dirty,
-                &mut self.event_bus,
-            );
+            ui.separator();
+
+            // Toolbar: identity, Editor/Graph tabs, and quick actions.
+            let palette = palette(ctx);
+            ui.horizontal(|ui| {
+                let vault_name = self
+                    .vault
+                    .as_ref()
+                    .and_then(|vault| vault.root.file_name())
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("No vault");
+                ui.label(egui::RichText::new(vault_name).strong().size(15.0));
+                if let Some(doc) = &self.open_document {
+                    let name = doc
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("untitled");
+                    ui.label(
+                        egui::RichText::new(format!("/ {name}"))
+                            .size(12.0)
+                            .color(palette.text_muted),
+                    );
+                }
+                if self.dirty {
+                    badge(ui, "Unsaved", palette.warning);
+                }
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(4.0);
+                let active_tab = usize::from(self.panels.active == PanelId::Graph);
+                if let Some(tab) = tab_bar(ui, active_tab, &["Editor", "Graph"]) {
+                    self.panels.active = if tab == 1 {
+                        PanelId::Graph
+                    } else {
+                        PanelId::EditorSplit
+                    };
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if icon_button(ui, "Settings", "Preferences").clicked() {
+                        self.settings_open = true;
+                    }
+                    if icon_button(ui, "Search", "Search notes (Ctrl+F)").clicked() {
+                        self.search_open = !self.search_open;
+                        if self.search_open {
+                            self.panels.search.focus();
+                        }
+                    }
+                });
+            });
+            ui.add_space(2.0);
         });
 
         // Conflict banner: a file changed on disk while the buffer was dirty.
         let mut dismiss_notice = false;
-        if let Some(notice) = &self.external_change {
+        if let Some(notice) = self.external_change.clone() {
+            let palette = palette(ctx);
             TopBottomPanel::top("external_change_banner").show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.colored_label(egui::Color32::from_rgb(220, 140, 50), notice);
-                    if ui.button("Dismiss").clicked() {
-                        dismiss_notice = true;
-                    }
-                });
+                toast(ui, &notice, palette.warning, &mut dismiss_notice);
             });
         }
         if dismiss_notice {
             self.external_change = None;
+        }
+
+        // Persistent status bar: vault, note, save state, and graph stats.
+        {
+            let palette = palette(ctx);
+            let mut left = Vec::new();
+            left.push(
+                self.vault
+                    .as_ref()
+                    .and_then(|vault| vault.root.file_name())
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("No vault")
+                    .to_string(),
+            );
+            if let Some(doc) = &self.open_document {
+                left.push(doc.display().to_string());
+                left.push(format!(
+                    "{} words",
+                    self.document_content.split_whitespace().count()
+                ));
+            }
+            if self.open_document.is_some() {
+                left.push(if self.dirty { "Unsaved" } else { "Saved" }.to_string());
+            }
+            let right = vec![
+                format!("{} nodes", self.graph.node_count()),
+                format!("{} links", self.graph.edge_count()),
+                "Ctrl+P commands".to_string(),
+            ];
+            TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+                status_bar(ui, &palette, &left, &right);
+            });
         }
 
         // Bottom search panel.
@@ -1043,7 +1130,7 @@ impl eframe::App for EditorApp {
         if self.open_document.is_some() {
             TopBottomPanel::bottom("backlinks_panel")
                 .resizable(true)
-                .default_height(110.0)
+                .default_height(76.0)
                 .show(ctx, |ui| {
                     self.panels.backlinks.show(
                         ui,
@@ -1053,6 +1140,17 @@ impl eframe::App for EditorApp {
                     );
                 });
         }
+
+        // Left side panel: file tree.
+        SidePanel::left("file_tree").show(ctx, |ui| {
+            self.panels.file_tree.show(
+                ui,
+                self.vault.as_mut(),
+                self.open_document.as_deref(),
+                self.dirty,
+                &mut self.event_bus,
+            );
+        });
 
         // Central panel: editor split or graph view depending on active panel.
         let mut graph_moved = false;

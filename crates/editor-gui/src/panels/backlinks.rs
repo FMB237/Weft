@@ -4,9 +4,11 @@
 //! [`GraphQuery::backlinks`]. Clicking a backlink opens the source note.
 
 use crate::event_bus::{Event, EventBus};
+use crate::theme::palette;
+use crate::widgets::chrome::section_header;
 use editor_core::graph::LinkGraph;
 use editor_core::graph_queries::GraphQuery;
-use egui::Ui;
+use egui::{RichText, Ui};
 use std::path::Path;
 
 #[derive(Debug, Default)]
@@ -25,15 +27,24 @@ impl BacklinksPanel {
         open_document: Option<&Path>,
         event_bus: &mut EventBus,
     ) {
-        ui.heading("Backlinks");
+        let palette = palette(ui.ctx());
+        section_header(ui, "Backlinks");
 
         let Some(path) = open_document else {
-            ui.label("Open a note to see which notes link to it.");
+            ui.label(
+                RichText::new("Open a note to see which notes link to it.")
+                    .size(12.0)
+                    .color(palette.text_muted),
+            );
             return;
         };
 
         let Some(node_id) = graph.node_by_path(path) else {
-            ui.label("This note is not in the graph yet.");
+            ui.label(
+                RichText::new("This note is not in the graph yet.")
+                    .size(12.0)
+                    .color(palette.text_muted),
+            );
             return;
         };
 
@@ -42,7 +53,11 @@ impl BacklinksPanel {
         backlinks.dedup_by(|a, b| a.0 == b.0);
 
         if backlinks.is_empty() {
-            ui.label("No other note links here yet.");
+            ui.label(
+                RichText::new("No other note links here yet.")
+                    .size(12.0)
+                    .color(palette.text_muted),
+            );
             return;
         }
 

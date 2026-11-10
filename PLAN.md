@@ -15,10 +15,10 @@ exists today**, **what is broken**, and **the order in which to fix it**.
 | Workspace | 3 crates: `editor-core`, `editor-gui`, `editor-cli` |
 | Size | ~7,800 lines of Rust |
 | Build | `cargo check --workspace --all-targets` passes |
-| Tests | Core: 77 unit + 13 integration pass. GUI: 30 unit + 5 integration pass |
+| Tests | Core: 90 unit + 16 integration pass. GUI: 33 unit + 5 integration pass. CLI: 3 unit |
 | Known failure | none |
-| Git | Initialized; M0, M1, and M2 milestones committed |
-| Docs | `README.md` matches the current feature set; M3 work is listed below |
+| Git | Initialized; M0, M1, M2, and M3 milestones committed |
+| Docs | `README.md`, `docs/architecture.md`, and `docs/roadmap.md` match the implementation |
 
 ### The one-sentence diagnosis
 
@@ -37,7 +37,7 @@ escaping, docs).
 | Layout persistence | `editor-core/src/layout_store.rs` | Yes (`<vault>/.editor/layout.json`) |
 | Tantivy full-text search | `editor-core/src/index.rs` | Yes (search panel) |
 | File watcher | `editor-core/src/watcher.rs` | Yes (background thread) |
-| Clustering | `editor-core/src/clustering.rs` | **No** |
+| Clustering | `editor-core/src/clustering.rs` | Yes (graph colouring) |
 | Backlinks / centrality | `editor-core/src/graph_queries.rs` | Backlinks yes; centrality not surfaced |
 | Export | `editor-core/src/export.rs` | Yes |
 | Plugins | `editor-core/src/plugins.rs` | Lifecycle only |
@@ -291,25 +291,26 @@ results.
 
 Goal: make it feel like a finished product.
 
-- [ ] **Design system**
-  - [ ] Implement `apply_theme` with the tokens above.
-  - [ ] Bundle Inter + JetBrains Mono.
-  - [ ] Build shared `card`, `section_header`, `icon_button`, `tab_bar`,
+- [x] **Design system**
+  - [x] Implement `apply_theme` with the tokens above.
+  - [x] Bundle Inter + JetBrains Mono.
+  - [x] Build shared `card`, `section_header`, `icon_button`, `tab_bar`,
         `empty_state`, `toast`, `status_bar` widgets.
-  - [ ] Style menu bar, panels, scrollbars, selection, and focus rings.
-  - [ ] Light theme + system follow.
-  - [ ] Verify contrast and hit targets.
-- [ ] **Correctness**
-  - [ ] Support YAML frontmatter (`serde_yaml` or `gray_matter`); preserve the
+  - [x] Style menu bar, panels, scrollbars, selection, and focus rings.
+  - [x] Light theme + system follow.
+  - [x] Verify contrast and hit targets.
+- [x] **Correctness**
+  - [x] Support YAML frontmatter (`serde_yaml` or `gray_matter`); preserve the
         original block on save instead of reserializing.
-  - [ ] Escape HTML in export titles and body.
-  - [ ] Fix CLI path handling: `--vault <root>` plus paths relative to root;
+  - [x] Escape HTML in export titles (Markdown body HTML is left to
+        pulldown-cmark).
+  - [x] Fix CLI path handling: `--vault <root>` plus paths relative to root;
         current `create` can produce `vault/vault/note.md`.
-  - [ ] Handle malformed files without panicking; log and continue.
-- [ ] **Docs and tests**
-  - [ ] `docs/architecture.md`, `docs/roadmap.md`.
-  - [ ] Tests for wikilink resolution, frontmatter round-trip, and settings.
-  - [ ] Benchmark graph layout at 100 / 500 / 1000 nodes.
+  - [x] Handle malformed files without panicking; log and continue.
+- [x] **Docs and tests**
+  - [x] `docs/architecture.md`, `docs/roadmap.md`.
+  - [x] Tests for wikilink resolution, frontmatter round-trip, and settings.
+  - [x] Benchmark graph layout at 100 / 500 / 1000 nodes.
 
 **Done when:** the app looks intentional, `cargo test` is green, and the
 README screenshots/description match what the app actually does.
@@ -328,12 +329,12 @@ README screenshots/description match what the app actually does.
 | 6 | Auto-save hardcodes 30s | `editor-gui/src/app.rs:219` | fixed in M1 |
 | 7 | Shortcut labels are wrong | `editor-gui/src/app.rs:262`, `:435` | fixed in M1 |
 | 8 | `Settings::default` font 0.0 | `editor-gui/src/settings.rs:15` | fixed in M0 |
-| 9 | Frontmatter is TOML-only | `editor-core/src/document.rs:93` | M3 |
+| 9 | Frontmatter is TOML-only | `editor-core/src/document.rs:93` | fixed in M3 (YAML fallback) |
 | 10 | Wikilinks do not resolve `.md` | `editor-core/src/graph_updater.rs:81` | fixed in M2 |
 | 11 | `comrak` configured but unused | `editor-core/src/parser.rs:49` | fixed in M0 |
 | 12 | Search snippet is the title | `editor-core/src/index.rs:128` | fixed in M2 |
-| 13 | Export title is unescaped | `editor-core/src/export.rs:20` | M3 |
-| 14 | CLI can double the vault path | `editor-cli/src/main.rs:64` | M3 |
+| 13 | Export title is unescaped | `editor-core/src/export.rs:20` | fixed in M3 |
+| 14 | CLI can double the vault path | `editor-cli/src/main.rs:64` | fixed in M3 (`--vault`) |
 | 15 | Dead `panels/editor.rs` | `editor-gui/src/panels/` | fixed in M0 |
 | 16 | Layout cache ignores identity | `editor-gui/src/widgets/graph_canvas.rs:99` | fixed in M2 |
 

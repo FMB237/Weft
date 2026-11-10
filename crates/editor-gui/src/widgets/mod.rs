@@ -1,5 +1,6 @@
 //! Widgets module.
 
+pub mod chrome;
 mod graph_canvas;
 mod markdown_editor;
 mod syntax_highlight;

@@ -24,30 +24,9 @@ const NODE_RADIUS: f32 = 13.0;
 const DEGREE_SCALE: f32 = 3.0;
 /// Largest node radius, so hubs do not swallow the canvas.
 const MAX_NODE_RADIUS: f32 = 30.0;
-/// Stroke for graph edges.
-const EDGE_STROKE: Stroke = Stroke {
-    width: 1.0,
-    color: Color32::from_rgb(140, 140, 140),
-};
 /// Arrowhead size in screen pixels.
 const ARROW_LENGTH: f32 = 8.0;
-/// Stroke for node circles.
-const NODE_STROKE: Stroke = Stroke {
-    width: 1.5,
-    color: Color32::from_rgb(110, 110, 110),
-};
-/// Default fill for unselected nodes.
-const NODE_FILL: Color32 = Color32::from_rgb(40, 100, 180);
-/// Fill for unresolved link placeholders.
-const PLACEHOLDER_FILL: Color32 = Color32::from_rgb(85, 85, 95);
-/// Fill for selected nodes.
-const SELECTED_FILL: Color32 = Color32::from_rgb(220, 140, 50);
-/// Color for node title text.
-const TEXT_COLOR: Color32 = Color32::from_gray(240);
-/// Dim text for unresolved nodes.
-const PLACEHOLDER_TEXT: Color32 = Color32::from_gray(180);
 const OPEN_DOC_STROKE_WIDTH: f32 = 3.0;
-const OPEN_DOC_STROKE_COLOR: Color32 = Color32::from_rgb(255, 215, 0);
 /// Maximum number of characters shown in a node label.
 const LABEL_MAX_CHARS: usize = 22;
 /// Palette used when node colouring by cluster is enabled.
@@ -61,6 +40,34 @@ const CLUSTER_COLORS: [Color32; 8] = [
     Color32::from_rgb(196, 98, 132),
     Color32::from_rgb(136, 148, 206),
 ];
+
+/// Theme-resolved colors for one graph render pass.
+#[derive(Debug, Clone, Copy)]
+struct GraphColors {
+    edge: Stroke,
+    node_stroke: Stroke,
+    node: Color32,
+    placeholder: Color32,
+    selected: Color32,
+    text: Color32,
+    placeholder_text: Color32,
+    open_doc: Color32,
+}
+
+impl GraphColors {
+    fn from_palette(palette: crate::theme::Palette) -> Self {
+        Self {
+            edge: Stroke::new(1.0, palette.graph_edge),
+            node_stroke: Stroke::new(1.5, palette.text_muted.gamma_multiply(0.7)),
+            node: palette.graph_node,
+            placeholder: palette.graph_placeholder,
+            selected: palette.warning,
+            text: palette.text,
+            placeholder_text: palette.text_muted,
+            open_doc: palette.success,
+        }
+    }
+}
 
 /// A zoomable, pannable graph canvas.
 #[derive(Debug)]
@@ -213,6 +220,7 @@ impl GraphCanvas {
         let rect = ui.available_rect_before_wrap();
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
         let painter = ui.painter();
+        let colors = GraphColors::from_palette(crate::theme::palette(ui.ctx()));
 
         self.ensure_layout(graph);
         self.ensure_cluster_colors(graph);
@@ -277,7 +285,7 @@ impl GraphCanvas {
                 let direction = delta / distance;
                 let start = sp + direction * src_radius;
                 let end = tp - direction * tgt_radius;
-                painter.line_segment([start, end], EDGE_STROKE);
+                painter.line_segment([start, end], colors.edge);
 
                 let perpendicular = Vec2::new(-direction.y, direction.x);
                 let base = end - direction * ARROW_LENGTH;
@@ -287,7 +295,7 @@ impl GraphCanvas {
                         base + perpendicular * (ARROW_LENGTH * 0.5),
                         base - perpendicular * (ARROW_LENGTH * 0.5),
                     ],
-                    EDGE_STROKE.color,
+                    colors.edge.color,
                     Stroke::NONE,
                 ));
             }
@@ -317,19 +325,19 @@ impl GraphCanvas {
 
             let is_selected = self.selected == Some(node_id);
             let fill = if is_selected {
-                SELECTED_FILL
+                colors.selected
             } else if !node.resolved {
-                PLACEHOLDER_FILL
+                colors.placeholder
             } else if self.color_by_cluster {
                 self.cluster_colors
                     .as_ref()
-                    .and_then(|colors| colors.get(&node_id).copied())
-                    .unwrap_or(NODE_FILL)
+                    .and_then(|cluster_colors| cluster_colors.get(&node_id).copied())
+                    .unwrap_or(colors.node)
             } else {
-                NODE_FILL
+                colors.node
             };
             painter.circle_filled(screen_pos, radius, fill);
-            painter.circle_stroke(screen_pos, radius, NODE_STROKE);
+            painter.circle_stroke(screen_pos, radius, colors.node_stroke);
 
             // Highlight the node for the currently open document so the graph
             // stays in sync with the editor.
@@ -341,16 +349,16 @@ impl GraphCanvas {
                     radius + OPEN_DOC_STROKE_WIDTH,
                     Stroke {
                         width: OPEN_DOC_STROKE_WIDTH,
-                        color: OPEN_DOC_STROKE_COLOR,
+                        color: colors.open_doc,
                     },
                 );
             }
 
             // Labels sit outside the circle so they stay readable.
             let text_color = if node.resolved {
-                TEXT_COLOR
+                colors.text
             } else {
-                PLACEHOLDER_TEXT
+                colors.placeholder_text
             };
             painter.text(
                 screen_pos + Vec2::new(0.0, radius + 3.0),
@@ -383,7 +391,7 @@ impl GraphCanvas {
                     ui.label(node.path.display().to_string());
                     if !node.resolved {
                         ui.colored_label(
-                            egui::Color32::from_rgb(200, 160, 90),
+                            crate::theme::palette(ui.ctx()).warning,
                             "Missing note — click to create it",
                         );
                     }

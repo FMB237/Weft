@@ -4,6 +4,8 @@
 //! the user open a result with the mouse or arrow keys + Enter.
 
 use crate::event_bus::{Event, EventBus};
+use crate::theme::palette;
+use crate::widgets::chrome::{empty_state, section_header};
 use editor_core::index::{SearchIndex, SearchOptions, SearchResult};
 use egui::{Key, TextEdit, Ui};
 
@@ -85,11 +87,14 @@ impl SearchPanel {
         event_bus: &mut EventBus,
     ) -> bool {
         let mut close = false;
+        let palette = palette(ui.ctx());
         ui.horizontal(|ui| {
-            ui.heading("Search");
-            if ui.small_button("Close").clicked() {
-                close = true;
-            }
+            section_header(ui, "Search");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Close").clicked() {
+                    close = true;
+                }
+            });
         });
 
         let response = ui.add(
@@ -125,13 +130,13 @@ impl SearchPanel {
         }
 
         if let Some(error) = &self.error {
-            ui.colored_label(egui::Color32::from_rgb(220, 100, 80), error);
+            ui.colored_label(palette.danger, error);
         }
 
         if self.results.is_empty() {
             let parsed = parse_query(self.query.trim());
             if (!parsed.text.is_empty() || !parsed.tags.is_empty()) && self.error.is_none() {
-                ui.label("No matches.");
+                empty_state(ui, "No matches", "Try fewer words or a different #tag.");
             }
             return close;
         }
