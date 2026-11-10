@@ -373,3 +373,64 @@ fn plugin_graph_and_layout_cross_module() {
     assert!(graph.node(a).unwrap().position.is_some());
     assert!(graph.node(b).unwrap().position.is_some());
 }
+
+#[test]
+fn malformed_and_non_utf8_files_do_not_panic() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = Vault::open(dir.path()).unwrap();
+
+    std::fs::write(dir.path().join("invalid.md"), [0xff, 0xfe, 0x00, 0x80]).unwrap();
+    std::fs::write(
+        dir.path().join("broken-frontmatter.md"),
+        "---\ntitle: [unclosed\n---\nBody",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("valid.md"), "---\ntitle: Fine\n---\nBody").unwrap();
+
+    let files = vault.list_files().unwrap();
+    assert_eq!(files.len(), 3);
+
+    assert!(vault.read(Path::new("invalid.md")).is_err());
+    assert_eq!(
+        vault.read(Path::new("broken-frontmatter.md")).unwrap(),
+        "---\ntitle: [unclosed\n---\nBody"
+    );
+
+    let parsed = parse_markdown(
+        Path::new("broken-frontmatter.md"),
+        &vault.read(Path::new("broken-frontmatter.md")).unwrap(),
+    );
+    assert!(parsed.frontmatter.is_empty());
+    assert!(parsed.html.contains("Body"));
+}
+
+#[test]
+fn yaml_frontmatter_flows_through_parser_and_document() {
+    use editor_core::document::Document;
+
+    let content = "---\ntitle: YAML Note\ntags:\n  - yaml\n  - rust\n---\n# Body";
+    let parsed = parse_markdown(Path::new("note.md"), content);
+    assert_eq!(parsed.frontmatter.title.as_deref(), Some("YAML Note"));
+    assert_eq!(parsed.frontmatter.tags, vec!["yaml", "rust"]);
+
+    let document = Document::new(PathBuf::from("note.md"), content);
+    assert_eq!(document.title(), "YAML Note");
+    assert_eq!(document.content, "# Body");
+
+    let round_trip = Document::new(PathBuf::from("note.md"), &document.full_content());
+    assert_eq!(round_trip.frontmatter, document.frontmatter);
+}
+
+#[test]
+fn toml_frontmatter_keeps_other_keys() {
+    use editor_core::document::Document;
+
+    let document = Document::new(
+        PathBuf::from("note.md"),
+        "---\ntitle = \"T\"\nstatus = \"draft\"\n---\nBody",
+    );
+    assert_eq!(
+        document.frontmatter.other.get("status"),
+        Some(&toml::Value::String("draft".into()))
+    );
+}

@@ -101,26 +101,103 @@ pub fn parse_markdown(path: &Path, content: &str) -> ParsedDocument {
     }
 }
 
-/// Split an optional TOML frontmatter block from the markdown body.
+/// Split an optional frontmatter block from the markdown body.
 ///
-/// Returns `(frontmatter, body)`. When no frontmatter is present the first
-/// element is `None` and `body` is the original input unchanged.
+/// The block starts on the first non-blank line with `---` and ends at a line
+/// containing only `---` or `...` (the YAML document-end marker). Both LF and
+/// CRLF line endings are accepted. Returns `(frontmatter, body)`. When no
+/// frontmatter is present the first element is `None` and `body` is the
+/// original input unchanged.
 pub fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
     let leading_ws = content.len() - content.trim_start().len();
     let stripped = &content[leading_ws..];
-    if let Some(rest) = stripped.strip_prefix("---\n")
-        && let Some(end_idx) = rest.find("\n---\n")
-    {
-        return (Some(&rest[..end_idx]), &rest[end_idx + 5..]);
+
+    let Some(first_end) = stripped.find('\n') else {
+        return (None, content);
+    };
+    if stripped[..first_end].trim_end_matches('\r') != "---" {
+        return (None, content);
     }
+
+    let rest = &stripped[first_end + 1..];
+    let mut offset = 0;
+    for line in rest.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+        if trimmed == "---" || trimmed == "..." {
+            let frontmatter = rest[..offset].trim_end_matches(['\r', '\n']);
+            return (Some(frontmatter), &rest[offset + line.len()..]);
+        }
+        offset += line.len();
+    }
+
     (None, content)
 }
 
+/// Parse a document's frontmatter block.
+///
+/// TOML is tried first because it is the historical format and accepts the
+/// `key = value` syntax this editor writes. When that fails the block is
+/// parsed as YAML, which covers the `key: value` and `- item` forms used by
+/// most Obsidian vaults. Malformed blocks yield defaults instead of an error.
 pub fn parse_frontmatter(content: &str) -> crate::document::Frontmatter {
-    let (frontmatter, _) = split_frontmatter(content);
-    frontmatter
-        .and_then(|fm| toml_edit::de::from_str(fm).ok())
+    split_frontmatter(content)
+        .0
+        .map(parse_frontmatter_block)
         .unwrap_or_default()
+}
+
+/// Parse a raw frontmatter block as TOML, falling back to YAML.
+pub fn parse_frontmatter_block(block: &str) -> crate::document::Frontmatter {
+    if let Ok(frontmatter) = toml_edit::de::from_str(block) {
+        return frontmatter;
+    }
+    parse_yaml_frontmatter(block).unwrap_or_default()
+}
+
+fn parse_yaml_frontmatter(block: &str) -> Option<crate::document::Frontmatter> {
+    let value: serde_yaml::Value = serde_yaml::from_str(block).ok()?;
+    let mapping = value.as_mapping()?;
+
+    let mut table = toml::value::Table::new();
+    for (key, value) in mapping {
+        let key = key.as_str()?;
+        if let Some(value) = yaml_to_toml(value) {
+            table.insert(key.to_owned(), value);
+        }
+    }
+
+    toml::Value::Table(table).try_into().ok()
+}
+
+/// Convert a YAML value into the TOML value type used by [`Frontmatter`].
+///
+/// Null values are dropped: TOML has no null and an empty key carries no
+/// useful information.
+fn yaml_to_toml(value: &serde_yaml::Value) -> Option<toml::Value> {
+    match value {
+        serde_yaml::Value::Null => None,
+        serde_yaml::Value::Bool(value) => Some(toml::Value::Boolean(*value)),
+        serde_yaml::Value::Number(number) => number
+            .as_i64()
+            .map(toml::Value::Integer)
+            .or_else(|| number.as_f64().map(toml::Value::Float)),
+        serde_yaml::Value::String(value) => Some(toml::Value::String(value.clone())),
+        serde_yaml::Value::Sequence(values) => Some(toml::Value::Array(
+            values.iter().filter_map(yaml_to_toml).collect(),
+        )),
+        serde_yaml::Value::Mapping(mapping) => {
+            let mut table = toml::value::Table::new();
+            for (key, value) in mapping {
+                if let Some(key) = key.as_str()
+                    && let Some(value) = yaml_to_toml(value)
+                {
+                    table.insert(key.to_owned(), value);
+                }
+            }
+            Some(toml::Value::Table(table))
+        }
+        serde_yaml::Value::Tagged(tagged) => yaml_to_toml(&tagged.value),
+    }
 }
 
 /// Render markdown to HTML (standalone helper).
@@ -235,5 +312,40 @@ mod tests {
         let (fm, body) = split_frontmatter(content);
         assert_eq!(fm, Some("title = \"Hello\""));
         assert_eq!(body, "Body");
+    }
+
+    #[test]
+    fn split_frontmatter_accepts_crlf_and_document_end_marker() {
+        let content = "---\r\ntitle: Hello\r\n...\r\nBody";
+        let (fm, body) = split_frontmatter(content);
+        assert_eq!(fm, Some("title: Hello"));
+        assert_eq!(body, "Body");
+    }
+
+    #[test]
+    fn split_frontmatter_accepts_closing_delimiter_at_eof() {
+        let content = "---\ntitle: Hello\n---";
+        let (fm, body) = split_frontmatter(content);
+        assert_eq!(fm, Some("title: Hello"));
+        assert_eq!(body, "");
+    }
+
+    #[test]
+    fn parse_frontmatter_falls_back_to_yaml() {
+        let frontmatter = parse_frontmatter("---\ntitle: YAML\ntags: [a, b]\n---\nBody");
+        assert_eq!(frontmatter.title.as_deref(), Some("YAML"));
+        assert_eq!(frontmatter.tags, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn parse_frontmatter_prefers_toml() {
+        let frontmatter = parse_frontmatter("---\ntitle = \"TOML\"\n---\n");
+        assert_eq!(frontmatter.title.as_deref(), Some("TOML"));
+    }
+
+    #[test]
+    fn parse_frontmatter_ignores_garbage() {
+        let frontmatter = parse_frontmatter("---\n: : :\n---\nBody");
+        assert!(frontmatter.is_empty());
     }
 }

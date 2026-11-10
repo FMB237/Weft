@@ -16,6 +16,7 @@ use crate::vault::Vault;
 /// opened in any browser without additional assets.
 pub fn document_to_html(content: &str, title: &str) -> String {
     let body = crate::parser::markdown_to_html(content);
+    let title = escape_html(title);
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -88,6 +89,22 @@ pub fn document_to_html(content: &str, title: &str) -> String {
     )
 }
 
+/// Escape text for safe interpolation into HTML element content and quotes.
+fn escape_html(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
 /// Export a single document as a standalone HTML file.
 ///
 /// Writes the HTML to `output_path`. Returns the path written.
@@ -96,11 +113,7 @@ pub fn export_document(vault: &Vault, doc_path: &Path, output_path: &Path) -> Re
         .read(doc_path)
         .with_context(|| format!("read document {}", doc_path.display()))?;
 
-    let title = doc_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("untitled")
-        .to_string();
+    let title = crate::document::Document::new(doc_path.to_path_buf(), &content).title();
 
     let html = document_to_html(&content, &title);
 
@@ -160,6 +173,31 @@ mod tests {
         let html = document_to_html("# Hello World", "My Note");
         assert!(html.contains("<h1>My Note</h1>"));
         assert!(html.contains("<h1>Hello World</h1>"));
+    }
+
+    #[test]
+    fn document_to_html_escapes_title() {
+        let html = document_to_html("# Body", "1 < 2 & \"quoted\" </title><script>");
+        assert!(!html.contains("</title><script>"));
+        assert!(html.contains("1 &lt; 2 &amp; &quot;quoted&quot; &lt;/title&gt;&lt;script&gt;"));
+    }
+
+    #[test]
+    fn export_uses_frontmatter_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::open(dir.path()).unwrap();
+        vault
+            .write(
+                Path::new("note.md"),
+                "---\ntitle: Custom <Title>\n---\n\n# Body",
+            )
+            .unwrap();
+
+        let out = dir.path().join("note.html");
+        export_document(&vault, Path::new("note.md"), &out).unwrap();
+
+        let html = std::fs::read_to_string(&out).unwrap();
+        assert!(html.contains("<h1>Custom &lt;Title&gt;</h1>"));
     }
 
     #[test]
