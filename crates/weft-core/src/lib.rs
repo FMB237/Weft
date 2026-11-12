@@ -17,3 +17,4 @@ pub mod parser;
 pub mod plugins;
 pub mod vault;
 pub mod watcher;
+pub mod workspace;
