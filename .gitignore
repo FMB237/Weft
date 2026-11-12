@@ -5,6 +5,9 @@
 *.layout.json
 .editor/
 
+# Test residue: CLI runs that treat `~` as a literal directory
+/home/
+
 # OS / editor noise
 .DS_Store
 Thumbs.db
