@@ -115,9 +115,9 @@ impl Watcher {
         for ev in self.pending.drain(..) {
             let path = ev.path().to_path_buf();
             if latest.contains_key(&path) {
-                latest.insert(path.clone(), ev);
+                latest.insert(path, ev);
             } else {
-                latest.insert(path.clone(), ev.clone());
+                latest.insert(path.clone(), ev);
                 order.push(path);
             }
         }

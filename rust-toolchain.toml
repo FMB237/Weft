@@ -1,0 +1,5 @@
+[toolchain]
+# Keep in sync with .github/workflows/ci.yml. Pinned so local gate runs match
+# CI exactly; bump both together after checking new lints.
+channel = "1.95.0"
+components = ["clippy", "rustfmt"]

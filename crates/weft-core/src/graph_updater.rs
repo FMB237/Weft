@@ -123,7 +123,7 @@ impl<'a> GraphUpdater<'a> {
                 } else {
                     target.to_string()
                 };
-                let target_id = self.graph.add_node(target_path.clone(), display);
+                let target_id = self.graph.add_node(target_path, display);
                 self.graph.set_resolved(target_id, exists);
             } else if exists && let Some(target_id) = self.graph.node_by_path(&target_path) {
                 self.graph.set_resolved(target_id, true);
