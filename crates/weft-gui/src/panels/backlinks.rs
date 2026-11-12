@@ -6,10 +6,10 @@
 use crate::event_bus::{Event, EventBus};
 use crate::theme::palette;
 use crate::widgets::chrome::section_header;
-use editor_core::graph::LinkGraph;
-use editor_core::graph_queries::GraphQuery;
 use egui::{RichText, Ui};
 use std::path::Path;
+use weft_core::graph::LinkGraph;
+use weft_core::graph_queries::GraphQuery;
 
 #[derive(Debug, Default)]
 pub struct BacklinksPanel;

@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use crate::event_bus::{Event, EventBus};
 use crate::theme::palette;
 use crate::widgets::chrome::{empty_state, section_header};
-use editor_core::vault::Vault;
 use egui::{Id, RichText, ScrollArea, Ui, Vec2};
+use weft_core::vault::Vault;
 
 /// Height of a single file-tree row in points.
 const ITEM_HEIGHT: f32 = 20.0;

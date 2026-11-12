@@ -1,4 +1,4 @@
-//! Export functionality for the markdown editor.
+//! Export functionality for Weft.
 //!
 //! Supports exporting:
 //! - a single document as a standalone HTML file, and

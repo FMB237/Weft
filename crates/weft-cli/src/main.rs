@@ -8,11 +8,11 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use editor_core::{document::Document, vault::Vault};
+use weft_core::{document::Document, vault::Vault};
 
 #[derive(Parser)]
-#[command(name = "editor-cli")]
-#[command(about = "Markdown editor CLI", long_about = None)]
+#[command(name = "weft-cli")]
+#[command(about = "Weft — local-first Markdown vault CLI", long_about = None)]
 struct Cli {
     /// Vault root directory. Note paths are resolved relative to this root.
     ///

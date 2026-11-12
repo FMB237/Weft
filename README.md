@@ -1,7 +1,8 @@
-# Markdown Editor
+# Weft
 
-A local-first markdown editor written in Rust. Desktop UI is built with
-**eframe/egui**; the storage, parsing, graph, search and export logic lives in
+A local-first Markdown vault: a folder of plain files you own, with a fast
+editor, a live wikilink graph, backlinks, and full-text search. Desktop UI is
+built with **eframe/egui**; storage, parsing, graph, search and export live in
 a separate, GUI-independent core crate.
 
 > **Status:** M3 complete. The daily-driver loop is polished: a coherent
@@ -52,10 +53,10 @@ a separate, GUI-independent core crate.
 ## Workspace
 
 | Crate | Description |
-|-------|-------------|
-| `editor-core` | Vault CRUD, markdown/frontmatter parsing, link graph, layout, search index, file watching, export |
-| `editor-gui` | Desktop GUI (eframe/egui): file tree, editor, preview, graph, search |
-| `editor-cli` | Command-line tool to initialise vaults and manage markdown files |
+| --- | --- |
+| `weft-core` | Vault CRUD, markdown/frontmatter parsing, link graph, layout, search index, file watching, export |
+| `weft-gui` | Desktop GUI (eframe/egui): file tree, editor, preview, graph, search |
+| `weft-cli` | Command-line tool to initialise vaults and manage markdown files |
 
 ## Getting started
 
@@ -67,26 +68,30 @@ Install via [rustup](https://rustup.rs/).
 cargo build --workspace
 
 # Run the desktop app
-cargo run -p editor-gui
+cargo run -p weft-gui
+
+# Install both binaries (`weft` and `weft-cli`) into ~/.cargo/bin
+cargo install --path crates/weft-gui
+cargo install --path crates/weft-cli
 
 # Run the CLI
-cargo run -p editor-cli -- --help
+cargo run -p weft-cli -- --help
 ```
 
 ### CLI examples
 
 ```bash
 # Initialise a vault
-cargo run -p editor-cli -- init /path/to/my_vault
+cargo run -p weft-cli -- init /path/to/my_vault
 
 # Vault-relative paths (recommended)
-cargo run -p editor-cli -- --vault /path/to/my_vault create notes/hello.md --content "# Hello"
-cargo run -p editor-cli -- --vault /path/to/my_vault read notes/hello.md
-cargo run -p editor-cli -- --vault /path/to/my_vault list
+cargo run -p weft-cli -- --vault /path/to/my_vault create notes/hello.md --content "# Hello"
+cargo run -p weft-cli -- --vault /path/to/my_vault read notes/hello.md
+cargo run -p weft-cli -- --vault /path/to/my_vault list
 
 # Without --vault, a note path is resolved from its own parent directory
-cargo run -p editor-cli -- create /path/to/my_vault/note.md --content "# Hello"
-cargo run -p editor-cli -- list /path/to/my_vault
+cargo run -p weft-cli -- create /path/to/my_vault/note.md --content "# Hello"
+cargo run -p weft-cli -- list /path/to/my_vault
 ```
 
 Paths that escape the vault (`..`, absolute paths outside the root) are
@@ -148,13 +153,13 @@ CI runs the same three commands on pushes and pull requests
 (`.github/workflows/ci.yml`). Design notes and the module map live in
 [docs/architecture.md](docs/architecture.md); the next milestones are in
 [docs/roadmap.md](docs/roadmap.md). Layout benchmarks cover 100, 500, and 1000
-nodes: `cargo bench -p editor-core`.
+nodes: `cargo bench -p weft-core`.
 
 ### Layout
 
 ```
 crates/
-  editor-core/
+  weft-core/
     src/
       document.rs      document model, TOML/YAML frontmatter
       parser.rs        markdown parsing, wikilinks, frontmatter splitting
@@ -167,7 +172,7 @@ crates/
       watcher.rs       debounced filesystem watching
       index.rs         tantivy full-text search
       export.rs        single-document / vault export
-  editor-gui/
+  weft-gui/
     src/
       app.rs           application state, toolbar, status bar, dialogs
       theme.rs         design tokens, light/dark/system, bundled fonts
@@ -175,17 +180,17 @@ crates/
       event_bus.rs     cross-panel event dispatch
       panels/          file tree, editor split, preview, graph, search, backlinks
       widgets/         chrome widgets, markdown editor, highlighter, graph canvas
-  editor-cli/
+  weft-cli/
     src/main.rs        clap-based CLI
 ```
 
 ## Export
 
-`editor-core` exposes:
+`weft-core` exposes:
 
-- `editor_core::export::export_document(vault, doc_path, output_path)` —
+- `weft_core::export::export_document(vault, doc_path, output_path)` —
   renders a single document to a self-contained HTML file.
-- `editor_core::export::export_vault_bundle(vault, output_dir)` — copies every
+- `weft_core::export::export_vault_bundle(vault, output_dir)` — copies every
   markdown file in the vault (plus `vault.toml`) into an output directory.
 
 ## License

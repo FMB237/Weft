@@ -12,11 +12,11 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 
 use crate::event_bus::{Event, EventBus};
-use editor_core::clustering::cluster_graph;
-use editor_core::graph::{GraphNode, LinkGraph, NodeId};
-use editor_core::layout::{LayoutParams, layout_graph};
-use editor_core::layout_store::LayoutStore;
 use egui::{Align2, Color32, FontFamily, FontId, Id, Pos2, Response, Sense, Shape, Stroke, Vec2};
+use weft_core::clustering::cluster_graph;
+use weft_core::graph::{GraphNode, LinkGraph, NodeId};
+use weft_core::layout::{LayoutParams, layout_graph};
+use weft_core::layout_store::LayoutStore;
 
 /// Base radius of a node circle.
 const NODE_RADIUS: f32 = 13.0;

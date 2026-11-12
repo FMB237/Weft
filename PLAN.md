@@ -1,6 +1,6 @@
-# Markdown Editor — Working Plan
+# Weft — Working Plan
 
-A personal, Obsidian-like Markdown editor in Rust with a real link graph,
+A personal, Obsidian-like Markdown vault in Rust with a real link graph,
 backlinks, full-text search, and a polished desktop UI.
 
 This document replaces the old aspirational `PLAN.md`. It describes **what
@@ -12,7 +12,7 @@ exists today**, **what is broken**, and **the order in which to fix it**.
 
 | Item | State |
 |------|-------|
-| Workspace | 3 crates: `editor-core`, `editor-gui`, `editor-cli` |
+| Workspace | 3 crates: `weft-core`, `weft-gui`, `weft-cli` |
 | Size | ~7,800 lines of Rust |
 | Build | `cargo check --workspace --all-targets` passes |
 | Tests | Core: 90 unit + 16 integration pass. GUI: 33 unit + 5 integration pass. CLI: 3 unit |
@@ -31,16 +31,16 @@ escaping, docs).
 
 | Capability | Lives in | Wired to GUI? |
 |---|---|---|
-| Markdown parsing, wikilinks | `editor-core/src/parser.rs` | Preview + titles |
-| Link graph edges | `editor-core/src/graph_updater.rs` | Yes |
-| Force-directed layout | `editor-core/src/layout.rs` | Yes |
-| Layout persistence | `editor-core/src/layout_store.rs` | Yes (`<vault>/.editor/layout.json`) |
-| Tantivy full-text search | `editor-core/src/index.rs` | Yes (search panel) |
-| File watcher | `editor-core/src/watcher.rs` | Yes (background thread) |
-| Clustering | `editor-core/src/clustering.rs` | Yes (graph colouring) |
-| Backlinks / centrality | `editor-core/src/graph_queries.rs` | Backlinks yes; centrality not surfaced |
-| Export | `editor-core/src/export.rs` | Yes |
-| Plugins | `editor-core/src/plugins.rs` | Lifecycle only |
+| Markdown parsing, wikilinks | `weft-core/src/parser.rs` | Preview + titles |
+| Link graph edges | `weft-core/src/graph_updater.rs` | Yes |
+| Force-directed layout | `weft-core/src/layout.rs` | Yes |
+| Layout persistence | `weft-core/src/layout_store.rs` | Yes (`<vault>/.editor/layout.json`) |
+| Tantivy full-text search | `weft-core/src/index.rs` | Yes (search panel) |
+| File watcher | `weft-core/src/watcher.rs` | Yes (background thread) |
+| Clustering | `weft-core/src/clustering.rs` | Yes (graph colouring) |
+| Backlinks / centrality | `weft-core/src/graph_queries.rs` | Backlinks yes; centrality not surfaced |
+| Export | `weft-core/src/export.rs` | Yes |
+| Plugins | `weft-core/src/plugins.rs` | Lifecycle only |
 
 ---
 
@@ -68,7 +68,7 @@ Non-goals for now: collaboration, mobile, AI, PDF export, canvas/whiteboard.
 Keep the three-crate split. Fix responsibilities instead of moving files.
 
 ```
-markdown-editor/
+weft/
 ├── Cargo.toml                  # workspace
 ├── README.md                   # match reality
 ├── PLAN.md                     # this document
@@ -79,7 +79,7 @@ markdown-editor/
 │   └── roadmap.md
 ├── .github/workflows/ci.yml
 ├── crates/
-│   ├── editor-core/            # domain only, no egui dependency
+│   ├── weft-core/              # domain only, no egui dependency
 │   │   ├── src/
 │   │   │   ├── document.rs     # Document + frontmatter
 │   │   │   ├── vault.rs        # vault root + file IO
@@ -92,7 +92,7 @@ markdown-editor/
 │   │   │   ├── watcher.rs      # notify + debounce
 │   │   │   └── export.rs
 │   │   └── tests/
-│   ├── editor-gui/             # presentation + orchestration only
+│   ├── weft-gui/               # presentation + orchestration only
 │   │   ├── src/
 │   │   │   ├── app.rs          # single owner of app state
 │   │   │   ├── theme.rs        # design tokens + apply_theme()
@@ -100,7 +100,7 @@ markdown-editor/
 │   │   │   │                   # backlinks, settings
 │   │   │   └── widgets/        # graph_canvas, markdown_editor, markdown_preview
 │   │   └── tests/
-│   └── editor-cli/             # thin CLI over editor-core
+│   └── weft-cli/               # thin CLI over weft-core
 ├── examples/vault/             # links must resolve
 └── target/                     # ignored
 ```
@@ -109,7 +109,7 @@ markdown-editor/
 
 - **`EditorApp` owns state.** Panels take `&mut` slices; they never clone the
   graph or own documents.
-- **`editor-core` must not depend on `egui`.** Replace `egui::Pos2` with
+- **`weft-core` must not depend on `egui`.** Replace `egui::Pos2` with
   `[f32; 2]` or `emath::Pos2`, then drop the `egui` dependency from core.
 - **One settings source.** `Settings` owns theme/font/autosave. `AppState`
   owns vault path, open document, active panel, split ratio, layout. Delete
@@ -185,7 +185,7 @@ Goal: a clean baseline to build on.
 - [x] Fix `Settings::default`: `font_size = 15.0`,
       `auto_save_interval_secs = 0`; failing test goes green.
 - [x] Remove dead code and dependencies:
-  - [x] delete `crates/editor-gui/src/panels/editor.rs` (not a module)
+  - [x] delete `crates/weft-gui/src/panels/editor.rs` (not a module)
   - [x] remove `petgraph`, `uuid`, `walkdir`, `ignore`, `parking_lot`
   - [x] either call or remove the unused `comrak` block in `parser.rs`
 - [x] Reduce warnings to zero (or explicitly allow `missing_docs` in GUI).
@@ -218,7 +218,7 @@ Goal: usable daily for notes, even before the graph is fixed.
   - [x] Apply `settings.font_size` to the editor text.
   - [x] Apply the existing `SyntaxHighlighter` through `TextEdit::layouter`.
   - [x] Dirty-state indicator and confirm-before-discard on switch/close.
-  - [x] Window title: `filename — Markdown Editor` with `*` when dirty.
+  - [x] Window title: `filename — Weft` with `*` when dirty.
 - [x] **File tree**
   - [x] Nested folders with expand/collapse, not a flat list.
   - [x] Context menu: New Note, New Folder, Rename, Delete, Reveal path.
@@ -321,22 +321,22 @@ README screenshots/description match what the app actually does.
 
 | # | Bug | Location | Status |
 |---|---|---|---|
-| 1 | Graph has no edges | `editor-gui/src/app.rs` `rebuild_graph` | fixed in M2 |
-| 2 | Graph edits a clone | `editor-gui/src/panels/graph.rs:33` | fixed in M1 |
-| 3 | Preview shows raw HTML | `editor-gui/src/panels/preview.rs:31` | fixed in M1 |
-| 4 | Split ratio ignored | `editor-gui/src/panels/editor_split.rs:41` | fixed in M1 |
-| 5 | State/settings never saved | `editor-gui/src/app.rs:41`, `:575` | fixed in M1 |
-| 6 | Auto-save hardcodes 30s | `editor-gui/src/app.rs:219` | fixed in M1 |
-| 7 | Shortcut labels are wrong | `editor-gui/src/app.rs:262`, `:435` | fixed in M1 |
-| 8 | `Settings::default` font 0.0 | `editor-gui/src/settings.rs:15` | fixed in M0 |
-| 9 | Frontmatter is TOML-only | `editor-core/src/document.rs:93` | fixed in M3 (YAML fallback) |
-| 10 | Wikilinks do not resolve `.md` | `editor-core/src/graph_updater.rs:81` | fixed in M2 |
-| 11 | `comrak` configured but unused | `editor-core/src/parser.rs:49` | fixed in M0 |
-| 12 | Search snippet is the title | `editor-core/src/index.rs:128` | fixed in M2 |
-| 13 | Export title is unescaped | `editor-core/src/export.rs:20` | fixed in M3 |
-| 14 | CLI can double the vault path | `editor-cli/src/main.rs:64` | fixed in M3 (`--vault`) |
-| 15 | Dead `panels/editor.rs` | `editor-gui/src/panels/` | fixed in M0 |
-| 16 | Layout cache ignores identity | `editor-gui/src/widgets/graph_canvas.rs:99` | fixed in M2 |
+| 1 | Graph has no edges | `weft-gui/src/app.rs` `rebuild_graph` | fixed in M2 |
+| 2 | Graph edits a clone | `weft-gui/src/panels/graph.rs:33` | fixed in M1 |
+| 3 | Preview shows raw HTML | `weft-gui/src/panels/preview.rs:31` | fixed in M1 |
+| 4 | Split ratio ignored | `weft-gui/src/panels/editor_split.rs:41` | fixed in M1 |
+| 5 | State/settings never saved | `weft-gui/src/app.rs:41`, `:575` | fixed in M1 |
+| 6 | Auto-save hardcodes 30s | `weft-gui/src/app.rs:219` | fixed in M1 |
+| 7 | Shortcut labels are wrong | `weft-gui/src/app.rs:262`, `:435` | fixed in M1 |
+| 8 | `Settings::default` font 0.0 | `weft-gui/src/settings.rs:15` | fixed in M0 |
+| 9 | Frontmatter is TOML-only | `weft-core/src/document.rs:93` | fixed in M3 (YAML fallback) |
+| 10 | Wikilinks do not resolve `.md` | `weft-core/src/graph_updater.rs:81` | fixed in M2 |
+| 11 | `comrak` configured but unused | `weft-core/src/parser.rs:49` | fixed in M0 |
+| 12 | Search snippet is the title | `weft-core/src/index.rs:128` | fixed in M2 |
+| 13 | Export title is unescaped | `weft-core/src/export.rs:20` | fixed in M3 |
+| 14 | CLI can double the vault path | `weft-cli/src/main.rs:64` | fixed in M3 (`--vault`) |
+| 15 | Dead `panels/editor.rs` | `weft-gui/src/panels/` | fixed in M0 |
+| 16 | Layout cache ignores identity | `weft-gui/src/widgets/graph_canvas.rs:99` | fixed in M2 |
 
 ---
 

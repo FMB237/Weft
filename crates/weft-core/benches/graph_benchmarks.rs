@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use editor_core::graph::{LinkGraph, NodeId};
-use editor_core::layout::{LayoutParams, layout_graph};
+use weft_core::graph::{LinkGraph, NodeId};
+use weft_core::layout::{LayoutParams, layout_graph};
 
 fn build_graph(num_nodes: usize) -> LinkGraph {
     let mut graph = LinkGraph::new();

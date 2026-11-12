@@ -1,4 +1,4 @@
-//! Integration tests for editor-core crates.
+//! Integration tests for weft-core crates.
 //!
 //! These tests exercise cross-module behavior: graph + layout store,
 //! parser + graph building, vault CRUD + graph updater, etc.
@@ -10,10 +10,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use editor_core::graph::{LinkGraph, NodeId};
-use editor_core::layout_store::LayoutStore;
-use editor_core::parser::{ParsedDocument, Wikilink, extract_wikilinks, parse_markdown};
-use editor_core::vault::Vault;
+use weft_core::graph::{LinkGraph, NodeId};
+use weft_core::layout_store::LayoutStore;
+use weft_core::parser::{ParsedDocument, Wikilink, extract_wikilinks, parse_markdown};
+use weft_core::vault::Vault;
 
 fn make_graph_with_nodes(graph: &mut LinkGraph, paths: &[&str]) -> Vec<(NodeId, PathBuf)> {
     let mut ids = Vec::new();
@@ -292,9 +292,9 @@ fn vault_resolve_returns_full_path() {
 
 #[test]
 fn plugin_dispatch_notifies_all_plugins() {
-    use editor_core::plugins::{PluginEvent, PluginManager};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use weft_core::plugins::{PluginEvent, PluginManager};
 
     #[derive(Debug)]
     struct CountingPlugin {
@@ -302,14 +302,14 @@ fn plugin_dispatch_notifies_all_plugins() {
         counter: Arc<AtomicUsize>,
     }
 
-    impl editor_core::plugins::Plugin for CountingPlugin {
+    impl weft_core::plugins::Plugin for CountingPlugin {
         fn name(&self) -> &str {
             self.name
         }
         fn on_event(
             &mut self,
-            event: &editor_core::plugins::PluginEvent,
-            _manager: &mut editor_core::plugins::PluginManager,
+            event: &weft_core::plugins::PluginEvent,
+            _manager: &mut weft_core::plugins::PluginManager,
         ) -> anyhow::Result<()> {
             if matches!(event, PluginEvent::VaultOpened(_)) {
                 self.counter.fetch_add(1, Ordering::Relaxed);
@@ -345,10 +345,10 @@ fn plugin_dispatch_notifies_all_plugins() {
 
 #[test]
 fn plugin_graph_and_layout_cross_module() {
-    use editor_core::graph::LinkGraph;
-    use editor_core::layout::{LayoutParams, layout_graph};
-    use editor_core::layout_store::LayoutStore;
-    use editor_core::plugins::{PluginEvent, PluginManager};
+    use weft_core::graph::LinkGraph;
+    use weft_core::layout::{LayoutParams, layout_graph};
+    use weft_core::layout_store::LayoutStore;
+    use weft_core::plugins::{PluginEvent, PluginManager};
 
     // Build a graph, lay it out, persist positions, then notify plugins.
     let mut graph = LinkGraph::new();
@@ -406,7 +406,7 @@ fn malformed_and_non_utf8_files_do_not_panic() {
 
 #[test]
 fn yaml_frontmatter_flows_through_parser_and_document() {
-    use editor_core::document::Document;
+    use weft_core::document::Document;
 
     let content = "---\ntitle: YAML Note\ntags:\n  - yaml\n  - rust\n---\n# Body";
     let parsed = parse_markdown(Path::new("note.md"), content);
@@ -423,7 +423,7 @@ fn yaml_frontmatter_flows_through_parser_and_document() {
 
 #[test]
 fn toml_frontmatter_keeps_other_keys() {
-    use editor_core::document::Document;
+    use weft_core::document::Document;
 
     let document = Document::new(
         PathBuf::from("note.md"),

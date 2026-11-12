@@ -1,7 +1,9 @@
 [package]
-name = "editor-core"
+name = "weft-core"
 version = "0.1.0"
 edition = "2024"
+description = "Weft — vault, parsing, link graph, search, and export for a local-first Markdown editor"
+publish = false
 
 [lints]
 workspace = true

@@ -5,11 +5,11 @@
 
 use crate::theme::palette;
 use crate::widgets::chrome::{badge, card, empty_state};
-use editor_core::document::Frontmatter;
-use editor_core::parser::{parse_frontmatter, split_frontmatter};
 use egui::{RichText, Ui};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use std::path::PathBuf;
+use weft_core::document::Frontmatter;
+use weft_core::parser::{parse_frontmatter, split_frontmatter};
 
 #[derive(Debug)]
 pub struct PreviewPanel {

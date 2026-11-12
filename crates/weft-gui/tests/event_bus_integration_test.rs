@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use editor_gui::event_bus::{Event, EventBus};
+use weft_gui::event_bus::{Event, EventBus};
 
 fn selected(path: &str) -> Event {
     Event::NodeSelected(PathBuf::from(path))

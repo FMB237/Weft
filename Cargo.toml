@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "crates/editor-core",
-    "crates/editor-gui",
-    "crates/editor-cli",
+    "crates/weft-core",
+    "crates/weft-gui",
+    "crates/weft-cli",
 ]
 
 resolver = "2"

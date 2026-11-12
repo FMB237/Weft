@@ -7,9 +7,9 @@ use crate::event_bus::EventBus;
 use crate::theme::palette;
 use crate::widgets::GraphCanvas;
 use crate::widgets::chrome::{badge, section_header};
-use editor_core::graph::LinkGraph;
-use editor_core::layout_store::LayoutStore;
 use egui::{RichText, Ui};
+use weft_core::graph::LinkGraph;
+use weft_core::layout_store::LayoutStore;
 
 #[derive(Debug)]
 pub struct GraphPanel {

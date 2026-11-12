@@ -1,13 +1,13 @@
 # Architecture
 
-The editor is a three-crate Rust workspace. The core crate owns all domain
+Weft is a three-crate Rust workspace. The core crate owns all domain
 logic and has no dependency on the GUI; the GUI is a thin presentation layer
 over it, and the CLI exposes the same vault operations for scripts.
 
 ```
-editor-core   domain: vault IO, parsing, graph, layout, search, watcher, export
-editor-gui    eframe/egui desktop app
-editor-cli    clap command-line interface
+weft-core   domain: vault IO, parsing, graph, layout, search, watcher, export
+weft-gui    eframe/egui desktop app
+weft-cli    clap command-line interface
 ```
 
 ## Data flow
@@ -26,7 +26,7 @@ watcher. Panels never own vault data; they publish events (`NodeSelected`,
 `CreateNote`, `EntryDeleted`, …) through an in-process event bus, and the app
 dispatches them once per frame.
 
-## editor-core
+## weft-core
 
 | Module | Responsibility |
 |---|---|
@@ -56,7 +56,7 @@ The GUI saves the raw editor buffer verbatim, so the original frontmatter
 formatting and dialect survive a round-trip. `Document::full_content()` is the
 non-GUI serializer and always writes TOML.
 
-## editor-gui
+## weft-gui
 
 - `app.rs` — eframe entry point, persisted `AppState`, keyboard shortcuts,
   dialog modals, panel layout, and the status bar.
@@ -85,10 +85,10 @@ events after all panels have run. Repaints are requested only when needed
 ## Testing
 
 - Unit tests live beside each module.
-- `crates/editor-core/tests/integration_tests.rs` covers cross-module flows,
+- `crates/weft-core/tests/integration_tests.rs` covers cross-module flows,
   including malformed and non-UTF-8 files.
-- `crates/editor-core/benches/graph_benchmarks.rs` benchmarks graph operations
-  and layout at 100, 500, and 1000 nodes (`cargo bench -p editor-core`).
+- `crates/weft-core/benches/graph_benchmarks.rs` benchmarks graph operations
+  and layout at 100, 500, and 1000 nodes (`cargo bench -p weft-core`).
 - CI runs `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets -- -D warnings`, and
   `cargo test --workspace`.

@@ -2,17 +2,17 @@
 //!
 //! Handles app lifecycle: persistence (save/load vault state, window
 // position, layout), theme, panels, and wiring between the GUI and
-//! editor-core.
+//! weft-core.
 
 use std::path::{Component, Path, PathBuf};
 
-use editor_core::export::{export_document, export_vault_bundle};
-use editor_core::graph::LinkGraph;
-use editor_core::graph_updater::GraphUpdater;
-use editor_core::index::SearchIndex;
-use editor_core::layout_store::LayoutStore;
-use editor_core::vault::Vault;
-use editor_core::watcher::{WatchEvent, WatchHandle};
+use weft_core::export::{export_document, export_vault_bundle};
+use weft_core::graph::LinkGraph;
+use weft_core::graph_updater::GraphUpdater;
+use weft_core::index::SearchIndex;
+use weft_core::layout_store::LayoutStore;
+use weft_core::vault::Vault;
+use weft_core::watcher::{WatchEvent, WatchHandle};
 
 use eframe::Storage;
 use egui::{CentralPanel, Key, SidePanel, TopBottomPanel};
@@ -22,7 +22,7 @@ use crate::panels::{PanelId, Panels};
 use crate::settings::{Settings, SettingsPanel};
 use crate::theme::palette;
 use crate::widgets::chrome::{badge, icon_button, status_bar, tab_bar, toast};
-use editor_core::plugins::{PluginEvent, PluginManager};
+use weft_core::plugins::{PluginEvent, PluginManager};
 
 /// Persisted application state saved between sessions.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -647,14 +647,14 @@ impl EditorApp {
     /// Window title reflecting the open document and dirty state.
     fn window_title(&self) -> String {
         let Some(path) = &self.open_document else {
-            return "Markdown Editor".to_string();
+            return "Weft".to_string();
         };
         let name = path
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("untitled");
         let dirty = if self.dirty { " *" } else { "" };
-        format!("{name}{dirty} — Markdown Editor")
+        format!("{name}{dirty} — Weft")
     }
 
     /// Resolve a pending action after the user chooses save/discard/cancel.

@@ -1121,49 +1121,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "editor-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "editor-core",
-]
-
-[[package]]
-name = "editor-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "criterion",
- "egui",
- "notify",
- "pulldown-cmark 0.10.3",
- "serde",
- "serde_json",
- "serde_yaml",
- "slotmap",
- "tantivy",
- "tempfile",
- "tokio",
- "toml",
- "toml_edit 0.22.27",
-]
-
-[[package]]
-name = "editor-gui"
-version = "0.1.0"
-dependencies = [
- "editor-core",
- "eframe",
- "egui",
- "egui_commonmark",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "eframe"
 version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4691,6 +4648,49 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "url",
  "web-sys",
+]
+
+[[package]]
+name = "weft-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "weft-core",
+]
+
+[[package]]
+name = "weft-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "criterion",
+ "egui",
+ "notify",
+ "pulldown-cmark 0.10.3",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "slotmap",
+ "tantivy",
+ "tempfile",
+ "tokio",
+ "toml",
+ "toml_edit 0.22.27",
+]
+
+[[package]]
+name = "weft-gui"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui_commonmark",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "weft-core",
 ]
 
 [[package]]

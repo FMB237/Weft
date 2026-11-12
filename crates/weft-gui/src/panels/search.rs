@@ -1,13 +1,13 @@
 //! Search panel.
 //!
-//! Searches the open vault through `editor_core::index::SearchIndex` and lets
+//! Searches the open vault through `weft_core::index::SearchIndex` and lets
 //! the user open a result with the mouse or arrow keys + Enter.
 
 use crate::event_bus::{Event, EventBus};
 use crate::theme::palette;
 use crate::widgets::chrome::{empty_state, section_header};
-use editor_core::index::{SearchIndex, SearchOptions, SearchResult};
 use egui::{Key, TextEdit, Ui};
+use weft_core::index::{SearchIndex, SearchOptions, SearchResult};
 
 /// A raw search box value split into free text and `#tag` filters.
 #[derive(Debug, Default, PartialEq, Eq)]

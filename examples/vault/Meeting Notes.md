@@ -5,7 +5,7 @@ tags = ["meetings", "roadmap"]
 
 # Meeting Notes
 
-Discussed the roadmap for the Markdown Editor.
+Discussed the roadmap for Weft.
 
 Related: [[Projects/Alpha]], [[Tasks]].
 
