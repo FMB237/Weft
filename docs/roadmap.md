@@ -1,5 +1,8 @@
 # Roadmap
 
+The authoritative, checkbox-level plan lives in [PLAN.md](../PLAN.md). This
+page is the short version.
+
 ## Shipped
 
 ### M0 — Stabilize the baseline
@@ -9,9 +12,9 @@ lint cleanup.
 
 ### M1 — Daily-driver loop
 
-Vault open/reopen, nested file tree with create/rename/delete, syntax-highlighted
-editor, live preview, manual and timed auto-save, settings persistence, export,
-and keyboard shortcuts.
+Vault open/reopen, nested file tree with create/rename/delete,
+syntax-highlighted editor, live preview, manual and timed auto-save, settings
+persistence, export, and keyboard shortcuts.
 
 ### M2 — Connect the graph
 
@@ -31,24 +34,36 @@ colouring, and click-to-create for unresolved link placeholders.
 - `docs/architecture.md`, expanded tests, and 100/500/1000-node layout
   benchmarks.
 
+### Rename
+
+The project is Weft: `weft-core`, `weft-gui` (binary `weft`), `weft-cli`.
+
 ## Next
 
-Ordered by user value, not effort.
+Ordered so each milestone makes the next one cheaper. Full checklists in
+[PLAN.md](../PLAN.md).
 
-1. **Note tabs and split history.** Reopen recent notes quickly instead of one
-   document at a time.
-2. **Graph focus mode.** Filter the graph to a neighbourhood (N hops), search
-   node titles, and jump to a node from the command palette.
-3. **Backlink context.** Show the sentence around each backlink instead of only
-   the source note title.
-4. **Command palette v2.** Fuzzy-match commands and note titles, with recent
-   items first.
-5. **Editor ergonomics.** Line numbers, bracket/list continuation, and
-   configurable keybindings.
-6. **Export polish.** Optional dark HTML theme and PDF export.
-7. **Plugin surface.** Give plugins a safe, documented event API and a settings
-   hook; today plugins are lifecycle-only.
-8. **Accessibility and i18n.** Full keyboard traversal audit, screen-reader
-   labels, and externalized UI strings.
-9. **Mobile and collaboration.** Explicitly out of scope; the local-first
-   single-user design is intentional.
+1. **M4 — Workspace.** Tabs and split panes, per-pane back/forward history,
+   outline, breadcrumbs, quick switcher, command palette v2, find & replace,
+   `[[` autocomplete, clickable links in preview, image paste. Data safety
+   lands here too: trash, atomic writes, `.weft/history` snapshots, workspace
+   restore, and background indexing for large vaults.
+2. **M5 — Properties and views.** The keystone. Typed properties over
+   frontmatter, a filter/sort/group engine, and table, cards, and board views
+   saved in `.weft/views.toml`.
+3. **M6 — Time and tasks.** Daily notes, templates, task buckets
+   (Today/Upcoming/Inbox/Done), calendar and timeline views.
+4. **M7 — Connections.** Backlink context, unlinked mentions, local graph with
+   hop depth, graph filters and groups, `[[note#heading]]` and embeds, search
+   operators, saved searches, and `weft-cli doctor`.
+5. **M8 — Canvas and media.** Whiteboard canvas, attachments and inline
+   images, PDF and themed HTML export.
+6. **M9 — Ship v1.0.** Performance budgets, keybinding remap, docs and
+   screenshots, Linux packaging, and a month of daily dogfood.
+
+## Explicit non-goals
+
+No Live Preview/WYSIWYG, no Mermaid or LaTeX rendering, no realtime
+collaboration, no mobile or web app, no JS plugin ecosystem, and no hosted sync
+service. Weft is a single-user, local-first desktop tool; the differentiator is
+views and structure over plain Markdown files, built into the core.

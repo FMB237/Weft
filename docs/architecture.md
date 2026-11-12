@@ -82,6 +82,33 @@ events after all panels have run. Repaints are requested only when needed
 - eframe storage — window/app state (`editor_app_state`) and preferences
   (`editor_settings`), serialized as JSON.
 
+## Planned modules (M4–M8)
+
+The forward plan in `PLAN.md` adds bookkeeping under `<vault>/.weft/` and two
+layers to the core, both free of `egui` types:
+
+```
+weft-core/src/
+  properties.rs   typed property schema, inference, coercion
+  query.rs        filter/sort/group over a note set
+  views.rs        saved view definitions
+  tasks.rs        checkbox extraction and buckets
+  daily.rs        daily-note path resolution
+  templates.rs    template expansion
+  history.rs      file-recovery snapshots
+  trash.rs        system trash with in-vault fallback
+
+weft-gui/src/
+  workspace.rs    panes, tabs, session restore
+  nav.rs          per-pane back/forward history
+  panels/outline.rs, panels/properties.rs
+  panels/views/{table,cards,board,calendar,timeline}.rs
+```
+
+Rule: views are **data** (a filter/sort/group description in
+`.weft/views.toml`), evaluated by `weft-core`; the GUI only renders results.
+That keeps the feature testable without driving egui.
+
 ## Testing
 
 - Unit tests live beside each module.
