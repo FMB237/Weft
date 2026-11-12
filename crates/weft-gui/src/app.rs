@@ -56,10 +56,18 @@ impl AppState {
     const STORAGE_KEY: &'static str = "editor_app_state";
 
     pub fn load(storage: Option<&dyn Storage>) -> Self {
-        storage
-            .and_then(|s| s.get_string(Self::STORAGE_KEY))
-            .and_then(|s| serde_json::from_str::<AppState>(&s).ok())
-            .unwrap_or_default()
+        let Some(raw) = storage.and_then(|s| s.get_string(Self::STORAGE_KEY)) else {
+            return Self::default();
+        };
+        match serde_json::from_str::<AppState>(&raw) {
+            Ok(state) => state,
+            Err(error) => {
+                // A stale or hand-edited session must not fail silently: the
+                // default state has no vault, which looks like data loss.
+                eprintln!("Ignoring unreadable saved session ({error}); starting fresh.");
+                Self::default()
+            }
+        }
     }
 
     pub fn save(&self, storage: &mut dyn Storage) {
@@ -291,9 +299,10 @@ impl EditorApp {
     /// Open a document for editing.
     pub(crate) fn open_document(&mut self, path: &Path) {
         let Some(vault) = &self.vault else { return };
-        match vault.read(path) {
+        let relative = vault_relative(&vault.root, path);
+        match vault.read(&relative) {
             Ok(content) => {
-                self.open_document = Some(path.to_path_buf());
+                self.open_document = Some(relative);
                 self.document_content = content;
                 self.dirty = false;
                 self.last_auto_save = std::time::Instant::now();
@@ -1255,6 +1264,16 @@ enum PendingAction {
     Quit,
 }
 
+/// Normalize `path` to a vault-relative path.
+///
+/// The graph, the search index, and watcher events all key on paths relative
+/// to the vault root, so the open document must match, otherwise backlink and
+/// graph lookups miss. Absolute paths under `root` are stripped; anything else
+/// is returned unchanged.
+fn vault_relative(root: &Path, path: &Path) -> PathBuf {
+    path.strip_prefix(root).unwrap_or(path).to_path_buf()
+}
+
 /// Whether `path` is a normal, non-hidden markdown path relative to the vault
 /// root. Used before creating a note from an unresolved graph link.
 fn is_safe_note_path(path: &Path) -> bool {
@@ -1322,6 +1341,23 @@ mod tests {
         assert_eq!(loaded.open_document, state.open_document);
         assert_eq!(loaded.active_panel, state.active_panel);
         assert!((loaded.editor_split_ratio - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn vault_relative_strips_only_the_vault_root() {
+        let root = Path::new("/vault");
+        assert_eq!(
+            vault_relative(root, Path::new("/vault/notes/a.md")),
+            PathBuf::from("notes/a.md")
+        );
+        assert_eq!(
+            vault_relative(root, Path::new("notes/a.md")),
+            PathBuf::from("notes/a.md")
+        );
+        assert_eq!(
+            vault_relative(root, Path::new("/elsewhere/a.md")),
+            PathBuf::from("/elsewhere/a.md")
+        );
     }
 
     #[test]
