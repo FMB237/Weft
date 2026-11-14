@@ -44,6 +44,7 @@ dispatches them once per frame.
 | `workspace.rs` | Panes, tabs, and session restore: open/close/reorder/split/merge, rename and delete propagation, atomic save to `<vault>/.weft/workspace.toml`, and sanitizing of restored state. |
 | `file_ops.rs` | `FileOps` trait over a vault plus `write_atomic` (temp file, `fsync`, rename). |
 | `trash.rs` | Moves deleted files and directories to the platform trash, with `<vault>/.weft/trash/` as a fallback that preserves the original path. |
+| `history.rs` | File-recovery snapshots: records a note's previous contents on save into `<vault>/.weft/history/<note>/<ms>.md`, deduplicates unchanged content, and prunes to a per-note retention count. |
 | `plugins.rs` | Lifecycle-only plugin registry and dispatch. |
 | `export.rs` | Standalone HTML for one document (with escaped title) and a markdown bundle for a vault. |
 
@@ -86,6 +87,9 @@ events after all panels have run. Repaints are requested only when needed
 - `<vault>/.editor/layout.json` — graph node positions.
 - `<vault>/.weft/workspace.toml` — panes, tabs, order, active tab, view mode,
   cursor/scroll hints, and the split ratio. Unsaved buffers stay in memory.
+- `<vault>/.weft/history/<note>/<timestamp>.md` — recovery snapshots, one per
+  changed save, capped per note. Snapshots skip `fsync` because they are
+  derived data; a crash can cost the newest copy but never corrupt one.
 - eframe storage — window state (`editor_app_state`) and preferences
   (`editor_settings`), serialized as JSON. `editor_app_state` also keeps the
   last vault and note as a fallback for sessions saved before tabs existed.
@@ -103,8 +107,6 @@ weft-core/src/
   tasks.rs        checkbox extraction and buckets
   daily.rs        daily-note path resolution
   templates.rs    template expansion
-  history.rs      file-recovery snapshots
-  trash.rs        system trash with in-vault fallback
 
 weft-gui/src/
   nav.rs          per-pane back/forward history

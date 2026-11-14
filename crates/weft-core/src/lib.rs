@@ -10,6 +10,7 @@ pub mod file_ops;
 pub mod graph;
 pub mod graph_queries;
 pub mod graph_updater;
+pub mod history;
 pub mod index;
 pub mod layout;
 pub mod layout_store;

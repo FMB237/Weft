@@ -9,6 +9,7 @@ use std::path::{Component, Path, PathBuf};
 use weft_core::export::{export_document, export_vault_bundle};
 use weft_core::graph::LinkGraph;
 use weft_core::graph_updater::GraphUpdater;
+use weft_core::history::{DEFAULT_RETENTION, HistoryStore, Snapshot};
 use weft_core::index::SearchIndex;
 use weft_core::layout_store::LayoutStore;
 use weft_core::vault::Vault;
@@ -138,6 +139,16 @@ pub struct EditorApp {
     search_index: Option<SearchIndex>,
     /// Background filesystem watcher for the open vault.
     watcher: Option<WatchHandle>,
+    /// Save snapshots for the open vault.
+    history: Option<HistoryStore>,
+    /// Whether the file-recovery dialog is open.
+    recovery_open: bool,
+    /// Snapshots listed in the recovery dialog, newest first.
+    recovery_snapshots: Vec<Snapshot>,
+    /// Index of the selected recovery snapshot.
+    recovery_selected: Option<usize>,
+    /// Contents of the selected snapshot, shown as a preview.
+    recovery_preview: String,
     /// Whether the search panel is visible.
     search_open: bool,
     /// Notice shown when a file changed on disk while the buffer was dirty.
@@ -195,6 +206,11 @@ impl EditorApp {
             last_window_title: String::new(),
             search_index: None,
             watcher: None,
+            history: None,
+            recovery_open: false,
+            recovery_snapshots: Vec::new(),
+            recovery_selected: None,
+            recovery_preview: String::new(),
             search_open: false,
             external_change: None,
             theme_is_dark,
@@ -219,6 +235,7 @@ impl EditorApp {
         match Vault::open(path) {
             Ok(vault) => {
                 self.state.vault_path = Some(path.to_path_buf());
+                self.history = Some(HistoryStore::new(path));
                 self.vault = Some(vault);
                 self.layout_store = self
                     .layout_path()
@@ -436,6 +453,15 @@ impl EditorApp {
         let Some(path) = self.open_document.clone() else {
             return;
         };
+
+        // Snapshot what is on disk now, before the new buffer replaces it.
+        // Snapshot failures are derived-data failures: they must not block the
+        // save the user asked for.
+        if let Ok(previous) = vault.read(&path)
+            && let Some(history) = &self.history
+        {
+            let _ = history.record_with_retention(&path, &previous, DEFAULT_RETENTION);
+        }
 
         if vault.write(&path, &self.document_content).is_ok() {
             self.dirty = false;
@@ -861,6 +887,152 @@ impl EditorApp {
         }
     }
 
+    /// Load the open note's snapshots and show the recovery dialog.
+    fn open_recovery_dialog(&mut self) {
+        let Some(path) = self.open_document.clone() else {
+            return;
+        };
+        let Some(history) = self.history.as_ref() else {
+            return;
+        };
+        match history.snapshots(&path) {
+            Ok(snapshots) => {
+                let preview = snapshots
+                    .first()
+                    .and_then(|snapshot| history.read(snapshot).ok())
+                    .unwrap_or_default();
+                self.recovery_selected = (!snapshots.is_empty()).then_some(0);
+                self.recovery_snapshots = snapshots;
+                self.recovery_preview = preview;
+                self.recovery_open = true;
+            }
+            Err(error) => {
+                self.external_change = Some(format!("Could not read file history: {error}"));
+            }
+        }
+    }
+
+    /// Put the selected snapshot into the editor buffer without touching disk.
+    fn restore_selected_snapshot(&mut self) {
+        let Some(index) = self.recovery_selected else {
+            return;
+        };
+        let Some(snapshot) = self.recovery_snapshots.get(index).cloned() else {
+            return;
+        };
+        let Some(content) = self
+            .history
+            .as_ref()
+            .and_then(|history| history.read(&snapshot).ok())
+        else {
+            self.external_change = Some("Could not read the selected snapshot.".to_string());
+            return;
+        };
+        self.document_content = content;
+        self.dirty = true;
+        self.last_auto_save = std::time::Instant::now();
+        self.external_change = Some(format!(
+            "Restored the {} snapshot into the editor; save to keep it.",
+            snapshot.label()
+        ));
+        self.recovery_open = false;
+    }
+
+    /// Render the file-recovery dialog.
+    fn render_recovery_dialog(&mut self, ctx: &egui::Context) {
+        if !self.recovery_open {
+            return;
+        }
+        let mut close = false;
+        let mut restore = false;
+
+        // Size the list and preview to the viewport so the action row stays
+        // visible on small screens instead of being pushed off the bottom.
+        let screen_height = ctx.screen_rect().height();
+        let pane_height = ((screen_height - 260.0) * 0.7).clamp(120.0, 340.0);
+        let max_height = (screen_height - 160.0).max(240.0);
+
+        egui::Window::new("File recovery")
+            .collapsible(false)
+            .resizable(true)
+            .default_size([680.0, (pane_height + 150.0).min(max_height)])
+            .max_height(max_height)
+            .show(ctx, |ui| {
+                match &self.open_document {
+                    Some(path) => {
+                        ui.label(path.display().to_string());
+                    }
+                    None => {
+                        ui.label("No note is open.");
+                    }
+                }
+                ui.separator();
+
+                if self.recovery_snapshots.is_empty() {
+                    ui.label(
+                        "No snapshots yet. Weft records the previous contents of a note \
+                         whenever it is saved.",
+                    );
+                } else {
+                    ui.horizontal_top(|ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("recovery_list")
+                            .max_width(220.0)
+                            .max_height(pane_height)
+                            .show(ui, |ui| {
+                                for (index, snapshot) in self.recovery_snapshots.iter().enumerate()
+                                {
+                                    let selected = self.recovery_selected == Some(index);
+                                    if ui.selectable_label(selected, snapshot.label()).clicked() {
+                                        self.recovery_selected = Some(index);
+                                        self.recovery_preview = self
+                                            .history
+                                            .as_ref()
+                                            .and_then(|history| history.read(snapshot).ok())
+                                            .unwrap_or_default();
+                                    }
+                                }
+                            });
+                        ui.separator();
+                        egui::ScrollArea::both()
+                            .id_salt("recovery_preview")
+                            .max_height(pane_height)
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(&self.recovery_preview).monospace(),
+                                    )
+                                    .wrap(),
+                                );
+                            });
+                    });
+                }
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            self.recovery_selected.is_some(),
+                            egui::Button::new("Restore into editor"),
+                        )
+                        .clicked()
+                    {
+                        restore = true;
+                    }
+                    if ui.button("Close").clicked() {
+                        close = true;
+                    }
+                });
+            });
+
+        if restore {
+            self.restore_selected_snapshot();
+        }
+        if close {
+            self.recovery_open = false;
+        }
+    }
+
     /// Render the "unsaved changes" confirmation dialog when needed.
     fn render_unsaved_dialog(&mut self, ctx: &egui::Context) {
         if self.pending_action.is_none() {
@@ -1135,6 +1307,17 @@ impl eframe::App for EditorApp {
                         self.request_close_document();
                         ui.close_menu();
                     }
+                    ui.separator();
+                    if ui
+                        .add_enabled(
+                            self.open_document.is_some(),
+                            egui::Button::new("File Recovery..."),
+                        )
+                        .clicked()
+                    {
+                        self.open_recovery_dialog();
+                        ui.close_menu();
+                    }
                     ui.menu_button("Export", |ui| {
                         if ui.button("Export Document as HTML...").clicked() {
                             if let Some(doc) = &self.open_document {
@@ -1395,6 +1578,9 @@ impl eframe::App for EditorApp {
         if self.command_palette_open {
             self.render_command_palette(ctx);
         }
+
+        // Render the file-recovery dialog if open.
+        self.render_recovery_dialog(ctx);
 
         // Render the unsaved-changes confirmation dialog if pending.
         self.render_unsaved_dialog(ctx);

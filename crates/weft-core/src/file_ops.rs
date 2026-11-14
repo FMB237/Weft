@@ -17,6 +17,20 @@ use anyhow::Result;
 /// The parent directory is synced on a best-effort basis, because some
 /// platforms refuse to open a directory as a file.
 pub fn write_atomic(path: &Path, contents: &str) -> Result<()> {
+    write_atomic_inner(path, contents, true)
+}
+
+/// Like [`write_atomic`], but skips the `fsync` calls.
+///
+/// Use this for derived data — history snapshots, caches — where losing the
+/// newest copy during a crash is acceptable and the extra round-trips would
+/// make an interactive save feel slow. The rename still makes the result
+/// all-or-nothing.
+pub fn write_atomic_quick(path: &Path, contents: &str) -> Result<()> {
+    write_atomic_inner(path, contents, false)
+}
+
+fn write_atomic_inner(path: &Path, contents: &str, sync: bool) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)
         .with_context(|| format!("create directory {}", parent.display()))?;
@@ -32,8 +46,10 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<()> {
             .with_context(|| format!("create temp file {}", temp.display()))?;
         file.write_all(contents.as_bytes())
             .with_context(|| format!("write temp file {}", temp.display()))?;
-        file.sync_all()
-            .with_context(|| format!("sync temp file {}", temp.display()))?;
+        if sync {
+            file.sync_all()
+                .with_context(|| format!("sync temp file {}", temp.display()))?;
+        }
     }
 
     std::fs::rename(&temp, path).inspect_err(|_| {
@@ -42,7 +58,7 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<()> {
         let _ = std::fs::remove_file(&temp);
     })?;
 
-    if let Ok(dir) = std::fs::File::open(parent) {
+    if sync && let Ok(dir) = std::fs::File::open(parent) {
         let _ = dir.sync_all();
     }
     Ok(())

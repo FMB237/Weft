@@ -34,6 +34,10 @@ a separate, GUI-independent core crate.
 - **File tree:** nested folders with expand/collapse and a context menu for
   new notes/folders, rename, move-to-trash, and reveal-in-file-manager.
   Deletions use the system trash, with a `.weft/trash/` fallback.
+- **File recovery:** before a save overwrites a note, its previous contents
+  are kept under `.weft/history/` (newest 20 per note). **File > File
+  Recovery...** lists them with a preview and restores the chosen version into
+  the editor, so a bad overwrite is one save away from being undone.
 - **Graph:** a force-directed graph whose edges are wikilinks, with
   degree-sized nodes, arrowheads, hover tooltips, community colouring
   (toggleable), and draggable layout persisted to

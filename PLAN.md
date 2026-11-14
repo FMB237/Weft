@@ -170,11 +170,8 @@ weft-core/src/
   tasks.rs        checkbox extraction, due dates, buckets
   daily.rs        daily-note path/format resolution
   templates.rs    template expansion ({{date}}, {{title}}, {{cursor}})
-  history.rs      file-recovery snapshots (.weft/history)
-  trash.rs        system trash with in-vault fallback
 
 weft-gui/src/
-  workspace.rs    panes, tabs, session restore
   nav.rs          per-pane back/forward history
   panels/outline.rs
   panels/properties.rs
@@ -278,8 +275,11 @@ recoverable before anything can bulk-edit the vault.
       the fallback records each entry's original path in `origin.txt`.
 - [x] Atomic writes everywhere: `write_atomic` (temp file, `fsync`, rename) is
       used by `Vault::write`, `save_config`, `LayoutStore`, and the workspace.
-- [ ] `history.rs`: snapshot on every save into `.weft/history/`, retention
-      policy, and a **File recovery** dialog with restore.
+- [x] `history.rs`: the previous contents of a note are snapshotted into
+      `.weft/history/` before every save, identical content is skipped, and
+      each note keeps the newest 20 snapshots. **File > File Recovery...**
+      lists them with a preview and restores the chosen one into the editor
+      buffer, leaving the write to an explicit save.
 - [ ] A crashed session's unsaved buffer is offered back on next launch.
 
 **Scale**
