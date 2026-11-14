@@ -73,11 +73,15 @@ impl LayoutStore {
     }
 
     /// Write the store to a JSON file at `path`.
+    ///
+    /// The write is atomic, so a crash cannot leave a half-written layout that
+    /// the next launch would reject.
     pub fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
         let json = self
             .to_json()
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        std::fs::write(path, json)
+        crate::file_ops::write_atomic(path, &json)
+            .map_err(|error| std::io::Error::other(error.to_string()))
     }
 
     /// Load a store from a JSON file at `path`.

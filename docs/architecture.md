@@ -43,6 +43,7 @@ dispatches them once per frame.
 | `watcher.rs` | `notify` watcher on a background thread with debouncing; exposes a channel of `WatchEvent`s. |
 | `workspace.rs` | Panes, tabs, and session restore: open/close/reorder/split/merge, rename and delete propagation, atomic save to `<vault>/.weft/workspace.toml`, and sanitizing of restored state. |
 | `file_ops.rs` | `FileOps` trait over a vault plus `write_atomic` (temp file, `fsync`, rename). |
+| `trash.rs` | Moves deleted files and directories to the platform trash, with `<vault>/.weft/trash/` as a fallback that preserves the original path. |
 | `plugins.rs` | Lifecycle-only plugin registry and dispatch. |
 | `export.rs` | Standalone HTML for one document (with escaped title) and a markdown bundle for a vault. |
 

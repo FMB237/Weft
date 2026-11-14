@@ -406,12 +406,12 @@ impl FileTreePanel {
             .unwrap_or("entry");
         let mut confirmed = false;
         let mut cancel = false;
-        egui::Window::new("Delete")
+        egui::Window::new("Move to trash")
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
                 ui.label(format!(
-                    "Delete {name}{}?",
+                    "Move {name}{} to the trash?",
                     if is_dir {
                         " and everything inside it"
                     } else {
@@ -420,7 +420,7 @@ impl FileTreePanel {
                 ));
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui.button("Delete").clicked() {
+                    if ui.button("Move to trash").clicked() {
                         confirmed = true;
                     }
                     if ui.button("Cancel").clicked() {
@@ -435,13 +435,11 @@ impl FileTreePanel {
             let Some(path) = self.confirm_delete.take() else {
                 return;
             };
-            let result = if is_dir {
-                vault.delete_dir(&path)
-            } else {
-                vault.delete(&path)
-            };
-            match result {
-                Ok(()) => event_bus.publish(Event::EntryDeleted(path)),
+            match vault.trash(&path) {
+                Ok(location) => {
+                    self.notice = Some(format!("Moved to {}", location.describe()));
+                    event_bus.publish(Event::EntryDeleted(path));
+                }
                 Err(e) => self.notice = Some(format!("Delete failed: {e}")),
             }
         }

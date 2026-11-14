@@ -51,7 +51,7 @@ enum Commands {
         #[arg(short, long)]
         content: String,
     },
-    /// Delete a markdown file
+    /// Move a markdown file to the trash
     Delete {
         #[arg(value_name = "PATH")]
         path: PathBuf,
@@ -94,8 +94,8 @@ fn main() -> Result<()> {
         }
         Commands::Delete { path } => {
             let (vault, relative) = open_target(vault_root.as_deref(), &path)?;
-            vault.delete(&relative)?;
-            println!("Deleted {}", relative.display());
+            let location = vault.trash(&relative)?;
+            println!("Moved {} to {}", relative.display(), location.describe());
         }
         Commands::List { path } => {
             let root = vault_root.as_deref().unwrap_or(&path);

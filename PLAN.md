@@ -273,9 +273,11 @@ recoverable before anything can bulk-edit the vault.
 
 **Data safety**
 
-- [ ] Delete moves to the system trash (`trash` crate) with `.weft/trash/`
-      fallback; File tree and CLI share the same path.
-- [ ] Atomic writes everywhere: temp file, `fsync`, rename.
+- [x] Delete moves to the system trash (`trash` crate) with `.weft/trash/`
+      fallback; the file tree and `weft-cli delete` share the same path, and
+      the fallback records each entry's original path in `origin.txt`.
+- [x] Atomic writes everywhere: `write_atomic` (temp file, `fsync`, rename) is
+      used by `Vault::write`, `save_config`, `LayoutStore`, and the workspace.
 - [ ] `history.rs`: snapshot on every save into `.weft/history/`, retention
       policy, and a **File recovery** dialog with restore.
 - [ ] A crashed session's unsaved buffer is offered back on next launch.

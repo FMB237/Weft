@@ -45,7 +45,7 @@ impl Vault {
     pub fn save_config(&self) -> Result<()> {
         let data = toml::to_string_pretty(&self.config)?;
         let config_path = self.root.join("vault.toml");
-        std::fs::write(&config_path, data)?;
+        crate::file_ops::write_atomic(&config_path, &data)?;
         Ok(())
     }
 
@@ -141,12 +141,24 @@ impl Vault {
     }
 
     /// Write content to a file relative to the vault root.
+    ///
+    /// The write is atomic: a crash mid-save leaves the previous contents
+    /// intact instead of a truncated note.
     pub fn write(&self, path: &Path, content: &str) -> Result<()> {
         let full = self.root.join(path);
         if let Some(parent) = full.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&full, content).with_context(|| format!("write {}", full.display()))
+        crate::file_ops::write_atomic(&full, content)
+            .with_context(|| format!("write {}", full.display()))
+    }
+
+    /// Move a file or directory to the trash instead of deleting it.
+    ///
+    /// Uses the platform trash when available and `<vault>/.weft/trash/`
+    /// otherwise. Returns where the entry went.
+    pub fn trash(&self, path: &Path) -> Result<crate::trash::TrashLocation> {
+        crate::trash::trash_entry(&self.root, path)
     }
 
     /// Delete a file relative to the vault root.

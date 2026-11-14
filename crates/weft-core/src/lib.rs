@@ -15,6 +15,7 @@ pub mod layout;
 pub mod layout_store;
 pub mod parser;
 pub mod plugins;
+pub mod trash;
 pub mod vault;
 pub mod watcher;
 pub mod workspace;

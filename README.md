@@ -32,7 +32,8 @@ a separate, GUI-independent core crate.
 - **Preview:** rendered Markdown via `egui_commonmark`, with frontmatter shown
   as a metadata card. Drag the divider to resize editor and preview.
 - **File tree:** nested folders with expand/collapse and a context menu for
-  new notes/folders, rename, delete, and reveal-in-file-manager.
+  new notes/folders, rename, move-to-trash, and reveal-in-file-manager.
+  Deletions use the system trash, with a `.weft/trash/` fallback.
 - **Graph:** a force-directed graph whose edges are wikilinks, with
   degree-sized nodes, arrowheads, hover tooltips, community colouring
   (toggleable), and draggable layout persisted to
