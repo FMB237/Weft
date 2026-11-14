@@ -5,17 +5,22 @@ editor, a live wikilink graph, backlinks, and full-text search. Desktop UI is
 built with **eframe/egui**; storage, parsing, graph, search and export live in
 a separate, GUI-independent core crate.
 
-> **Status:** M3 complete. The daily-driver loop is polished: a coherent
-> light/dark/system design system, bundled type, YAML or TOML frontmatter, a
-> live link graph, backlinks, full-text search, and a background watcher. See
-> [docs/roadmap.md](docs/roadmap.md) for what comes next.
+> **Status:** M4 in progress. The workspace now opens notes in tabs, keeps
+> unsaved buffers per tab, and restores the session from
+> `<vault>/.weft/workspace.toml`. M3's design system, YAML/TOML frontmatter,
+> live link graph, backlinks, full-text search, and background watcher are all
+> still in place. See [docs/roadmap.md](docs/roadmap.md) for what comes next.
 
 ![Editor and preview](docs/screenshot.png)
 
 ## Features
 
-- **Vaults:** open a folder of Markdown files; the last vault and note reopen
-  on launch.
+- **Vaults:** open a folder of Markdown files; the last vault reopens on
+  launch with its open tabs, active tab, and split intact.
+- **Tabs:** several notes open at once, each keeping its own unsaved buffer, so
+  switching or closing never silently drops edits. `Ctrl+W` closes,
+  `Ctrl+Tab` cycles, `Ctrl+Shift+T` reopens the last closed tab, and the tab
+  context menu closes others or everything to the right.
 - **Editor:** syntax-highlighted Markdown editing with configurable font size,
   dirty-state indicator, and save-on-demand or timed auto-save. Editor and
   graph share one window through tabs.
@@ -45,9 +50,10 @@ a separate, GUI-independent core crate.
   block tag lists. Parsing is tolerant and the raw block is preserved on save.
 - **Export:** a note to standalone HTML (with escaped titles), or the whole
   vault to a bundle.
-- **Shortcuts:** `Ctrl/Cmd+S` save, `Ctrl/Cmd+O` open vault, `Ctrl/Cmd+N` new
-  note, `Ctrl/Cmd+F` search, `Ctrl/Cmd+P` command palette, `Ctrl/Cmd+G` graph,
-  `Ctrl/Cmd+W` close note, `Ctrl/Cmd+Tab` next note,
+- **Shortcuts:** `Ctrl/Cmd+S` save, `Ctrl/Cmd+N` or `Ctrl/Cmd+T` new note,
+  `Ctrl/Cmd+W` close tab, `Ctrl/Cmd+Tab` next tab,
+  `Ctrl/Cmd+Shift+T` reopen closed tab, `Ctrl/Cmd+O` open vault,
+  `Ctrl/Cmd+F` search, `Ctrl/Cmd+P` command palette, `Ctrl/Cmd+G` graph,
   `Ctrl/Cmd+Shift+P` export note, `Ctrl/Cmd+Shift+B` export vault.
 
 ## Workspace

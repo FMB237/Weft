@@ -13,6 +13,7 @@ use weft_core::index::SearchIndex;
 use weft_core::layout_store::LayoutStore;
 use weft_core::vault::Vault;
 use weft_core::watcher::{WatchEvent, WatchHandle};
+use weft_core::workspace::Workspace;
 
 use eframe::Storage;
 use egui::{CentralPanel, Key, SidePanel, TopBottomPanel};
@@ -21,7 +22,9 @@ use crate::event_bus::{Event, EventBus};
 use crate::panels::{PanelId, Panels};
 use crate::settings::{Settings, SettingsPanel};
 use crate::theme::palette;
-use crate::widgets::chrome::{badge, icon_button, status_bar, tab_bar, toast};
+use crate::widgets::chrome::{
+    TabStripAction, badge, document_tabs, icon_button, status_bar, tab_bar, toast,
+};
 use weft_core::plugins::{PluginEvent, PluginManager};
 
 /// Persisted application state saved between sessions.
@@ -87,6 +90,8 @@ pub struct EditorApp {
     pub(crate) state: AppState,
     /// Currently open vault.
     pub(crate) vault: Option<Vault>,
+    /// Open panes and tabs, and where the session left off.
+    pub(crate) workspace: Workspace,
     /// Currently open document (relative path within vault).
     pub(crate) open_document: Option<PathBuf>,
     /// Document content being edited.
@@ -167,6 +172,7 @@ impl EditorApp {
         let mut app = Self {
             state,
             vault: None,
+            workspace: Workspace::new(),
             open_document: None,
             document_content: String::new(),
             dirty: false,
@@ -194,16 +200,13 @@ impl EditorApp {
             theme_is_dark,
         };
 
-        // Re-open the last vault and document, if they still exist.
+        // Re-open the last vault and its workspace, if they still exist. The
+        // workspace file is authoritative; `state.open_document` is only a
+        // fallback for sessions saved before tabs existed.
         if let Some(vault_path) = app.state.vault_path.clone()
             && vault_path.exists()
         {
             app.open_vault(&vault_path);
-        }
-        if let Some(doc) = app.state.open_document.clone()
-            && app.vault.is_some()
-        {
-            app.open_document(&doc);
         }
 
         app
@@ -211,6 +214,8 @@ impl EditorApp {
 
     /// Open a vault at the given path.
     pub(crate) fn open_vault(&mut self, path: &Path) {
+        // Persist the outgoing session before switching vaults.
+        self.save_workspace();
         match Vault::open(path) {
             Ok(vault) => {
                 self.state.vault_path = Some(path.to_path_buf());
@@ -223,6 +228,7 @@ impl EditorApp {
                 self.document_content.clear();
                 self.dirty = false;
                 self.last_auto_save = std::time::Instant::now();
+                self.restore_workspace(path);
                 self.panels.graph.reset();
                 self.watcher = WatchHandle::start(path).ok();
                 self.rebuild_search_index();
@@ -236,6 +242,92 @@ impl EditorApp {
                 eprintln!("Failed to open vault at {}: {e}", path.display());
             }
         }
+    }
+
+    /// Load the saved workspace for `root` and show its active tab.
+    ///
+    /// A corrupt file is reported in the conflict banner instead of silently
+    /// discarding the user's session.
+    fn restore_workspace(&mut self, root: &Path) {
+        let workspace = match Workspace::try_load(root) {
+            Ok(workspace) => workspace,
+            Err(error) => {
+                self.external_change = Some(format!("Could not restore the workspace: {error}"));
+                Workspace::new()
+            }
+        };
+        self.workspace = workspace;
+
+        // Sessions written before tabs existed have only `open_document`.
+        if self.workspace.is_empty()
+            && let Some(doc) = self.state.open_document.clone()
+            && root.join(&doc).is_file()
+        {
+            self.workspace.open(doc);
+        }
+        self.load_active_tab();
+    }
+
+    /// Persist panes, tabs, and view state for the current vault.
+    pub(crate) fn save_workspace(&mut self) {
+        self.stash_active_tab();
+        let Some(vault) = &self.vault else { return };
+        if let Err(error) = self.workspace.save(&vault.root) {
+            eprintln!("Failed to save the workspace: {error}");
+        }
+    }
+
+    /// Copy the live editor buffer into the active tab.
+    ///
+    /// Tabs own their unsaved buffers so switching away from a dirty note does
+    /// not discard edits, and so closing a tab can still offer to save it.
+    fn stash_active_tab(&mut self) {
+        let dirty = self.dirty;
+        let content = std::mem::take(&mut self.document_content);
+        if let Some(tab) = self.workspace.active_tab_mut() {
+            tab.unsaved = if dirty { Some(content.clone()) } else { None };
+        }
+        self.document_content = content;
+    }
+
+    /// Load the active tab's buffer into the editor fields.
+    fn load_active_tab(&mut self) {
+        self.dirty = false;
+        self.document_content.clear();
+        self.open_document = None;
+        self.last_auto_save = std::time::Instant::now();
+
+        let Some(tab) = self.workspace.active_tab() else {
+            return;
+        };
+        self.open_document = Some(tab.path.clone());
+        if let Some(buffer) = &tab.unsaved {
+            self.document_content = buffer.clone();
+            self.dirty = true;
+            return;
+        }
+        let Some(vault) = &self.vault else { return };
+        match vault.read(&tab.path) {
+            Ok(content) => self.document_content = content,
+            Err(error) => {
+                self.external_change =
+                    Some(format!("Could not read {}: {error}", tab.path.display()));
+            }
+        }
+    }
+
+    /// Switch to a tab in a pane, preserving the buffer of the tab left behind.
+    fn switch_to_tab(&mut self, pane: usize, index: usize) {
+        let Some(target) = self.workspace.panes.get(pane) else {
+            return;
+        };
+        if pane == self.workspace.focused && target.active == index {
+            return;
+        }
+        self.stash_active_tab();
+        self.workspace.focused = pane;
+        self.workspace.activate(index);
+        self.load_active_tab();
     }
 
     /// Path of the persisted graph layout inside the current vault.
@@ -296,33 +388,22 @@ impl EditorApp {
         self.search_index = Some(index);
     }
 
-    /// Open a document for editing.
+    /// Open a document in a tab of the focused pane.
     pub(crate) fn open_document(&mut self, path: &Path) {
         let Some(vault) = &self.vault else { return };
         let relative = vault_relative(&vault.root, path);
-        match vault.read(&relative) {
-            Ok(content) => {
-                self.open_document = Some(relative);
-                self.document_content = content;
-                self.dirty = false;
-                self.last_auto_save = std::time::Instant::now();
-                let _ = self
-                    .plugins
-                    .dispatch(&PluginEvent::DocumentOpened(path.to_path_buf()));
-            }
-            Err(e) => {
-                eprintln!("Failed to read document {}: {e}", path.display());
-            }
-        }
+        self.stash_active_tab();
+        self.workspace.open(relative);
+        self.load_active_tab();
+        let _ = self
+            .plugins
+            .dispatch(&PluginEvent::DocumentOpened(path.to_path_buf()));
     }
 
-    /// Open a document, asking the user first when the current one is dirty.
-    pub(crate) fn request_open_document(&mut self, path: PathBuf) {
-        if self.dirty && self.open_document.as_deref() != Some(path.as_path()) {
-            self.pending_action = Some(PendingAction::Open(path));
-        } else {
-            self.open_document(&path);
-        }
+    /// Open a document. Tabs make switching lossless, so there is nothing to
+    /// confirm: a dirty note keeps its buffer in its own tab.
+    pub(crate) fn request_open_document(&mut self, path: &Path) {
+        self.open_document(path);
     }
 
     /// Close the current document, asking the user first when it is dirty.
@@ -337,11 +418,12 @@ impl EditorApp {
         }
     }
 
-    /// Drop the in-memory document buffer without touching the file on disk.
+    /// Close the active tab, activating the neighbouring one.
     fn close_document_now(&mut self) {
-        self.open_document = None;
-        self.document_content.clear();
-        self.dirty = false;
+        let pane = self.workspace.focused;
+        let index = self.workspace.focused_pane().active;
+        self.workspace.close_tab(pane, index);
+        self.load_active_tab();
     }
 
     /// Save the current document to the vault.
@@ -357,6 +439,9 @@ impl EditorApp {
 
         if vault.write(&path, &self.document_content).is_ok() {
             self.dirty = false;
+            if let Some(tab) = self.workspace.active_tab_mut() {
+                tab.unsaved = None;
+            }
             self.last_auto_save = std::time::Instant::now();
             if let Some(index) = &mut self.search_index {
                 let _ = index.add_document(&path, &self.document_content);
@@ -381,7 +466,7 @@ impl EditorApp {
 
         // Clicking a placeholder that now exists should just open it.
         if vault.read(path).is_ok() {
-            self.request_open_document(path.to_path_buf());
+            self.request_open_document(path);
             return;
         }
 
@@ -390,7 +475,7 @@ impl EditorApp {
                 let _ = index.add_document(path, "");
             }
             self.rebuild_graph();
-            self.request_open_document(path.to_path_buf());
+            self.request_open_document(path);
         }
     }
 
@@ -403,25 +488,8 @@ impl EditorApp {
                 let _ = index.add_document(&path, "");
             }
             self.rebuild_graph();
-            self.request_open_document(path);
+            self.request_open_document(&path);
         }
-    }
-
-    /// Open the next markdown file in the vault, wrapping around.
-    pub(crate) fn cycle_note(&mut self) {
-        let Some(vault) = &self.vault else { return };
-        let Ok(files) = vault.list_files() else {
-            return;
-        };
-        if files.is_empty() {
-            return;
-        }
-        let current = self
-            .open_document
-            .as_ref()
-            .and_then(|open| files.iter().position(|f| f == open));
-        let next = current.map_or(0, |index| (index + 1) % files.len());
-        self.request_open_document(files[next].clone());
     }
 
     /// Auto-save the current document if dirty and enough time has passed.
@@ -446,7 +514,7 @@ impl EditorApp {
         for event in self.event_bus.drain() {
             match event {
                 Event::NodeSelected(path) | Event::NodeOpened(path) => {
-                    self.request_open_document(path);
+                    self.request_open_document(&path);
                 }
                 Event::CreateNote(path) => {
                     self.create_note_at(&path);
@@ -455,25 +523,21 @@ impl EditorApp {
                     self.rebuild_graph();
                 }
                 Event::EntryRenamed(from, to) => {
-                    if let Some(open) = self.open_document.clone() {
-                        if open == from {
-                            self.open_document = Some(to.clone());
-                        } else if let Ok(relative) = open.strip_prefix(&from) {
-                            self.open_document = Some(to.join(relative));
-                        }
-                    }
+                    // Keep the live buffer: a rename must not discard edits or
+                    // re-read the file from disk.
+                    self.workspace.rename_path(&from, &to);
+                    self.open_document = self.workspace.active_path().map(Path::to_path_buf);
                     self.rebuild_search_index();
                     self.panels.search.invalidate();
                     self.rebuild_graph();
                 }
                 Event::EntryDeleted(path) => {
-                    let deleted_open = self
-                        .open_document
-                        .as_deref()
-                        .is_some_and(|open| open == path || open.starts_with(&path));
-                    if deleted_open {
-                        self.close_document_now();
-                    }
+                    self.stash_active_tab();
+                    let keep = self
+                        .dirty
+                        .then(|| (self.workspace.focused, self.workspace.focused_pane().active));
+                    self.workspace.remove_path_keeping(&path, keep);
+                    self.load_active_tab();
                     self.rebuild_search_index();
                     self.panels.search.invalidate();
                     self.rebuild_graph();
@@ -528,32 +592,28 @@ impl EditorApp {
                 if let Some(index) = &mut self.search_index {
                     let _ = index.remove_document(&path);
                 }
-                let deleted_open = self
+                self.stash_active_tab();
+                let active_deleted = self
                     .open_document
                     .as_deref()
                     .is_some_and(|open| open == path || open.starts_with(&path));
-                if deleted_open {
-                    if self.dirty {
-                        self.external_change = Some(format!(
-                            "{} was deleted on disk; your buffer was kept.",
-                            path.display()
-                        ));
-                    } else {
-                        self.close_document_now();
-                    }
+                let keep = (active_deleted && self.dirty)
+                    .then(|| (self.workspace.focused, self.workspace.focused_pane().active));
+                if keep.is_some() {
+                    self.external_change = Some(format!(
+                        "{} was deleted on disk; your buffer was kept.",
+                        path.display()
+                    ));
                 }
+                self.workspace.remove_path_keeping(&path, keep);
+                self.load_active_tab();
                 self.panels.search.invalidate();
             }
             WatchEvent::Renamed(from, to) => {
                 self.rebuild_search_index();
                 self.panels.search.invalidate();
-                if let Some(open) = self.open_document.clone() {
-                    if open == from {
-                        self.open_document = Some(to);
-                    } else if let Ok(relative) = open.strip_prefix(&from) {
-                        self.open_document = Some(to.join(relative));
-                    }
-                }
+                self.workspace.rename_path(&from, &to);
+                self.open_document = self.workspace.active_path().map(Path::to_path_buf);
             }
         }
     }
@@ -609,6 +669,16 @@ impl EditorApp {
                 });
                 ctx.request_repaint();
             }
+            if input.key_pressed(Key::T) {
+                if self.workspace.reopen_closed().is_some() {
+                    self.load_active_tab();
+                }
+                ctx.request_repaint();
+            }
+            if input.key_pressed(Key::Tab) {
+                self.cycle_tab(-1);
+                ctx.request_repaint();
+            }
             return;
         }
 
@@ -647,10 +717,24 @@ impl EditorApp {
             self.request_close_document();
             ctx.request_repaint();
         }
-        if input.key_pressed(Key::Tab) {
-            self.cycle_note();
+        if input.key_pressed(Key::T) {
+            self.new_note();
             ctx.request_repaint();
         }
+        if input.key_pressed(Key::Tab) {
+            self.cycle_tab(1);
+            ctx.request_repaint();
+        }
+    }
+
+    /// Switch between the tabs of the focused pane.
+    fn cycle_tab(&mut self, delta: isize) {
+        if self.workspace.tab_count() < 2 {
+            return;
+        }
+        self.stash_active_tab();
+        self.workspace.cycle(delta);
+        self.load_active_tab();
     }
 
     /// Window title reflecting the open document and dirty state.
@@ -666,16 +750,109 @@ impl EditorApp {
         format!("{name}{dirty} — Weft")
     }
 
+    /// Whether any tab holds edits that are not on disk.
+    fn has_unsaved_tabs(&self) -> bool {
+        self.dirty
+            || self
+                .workspace
+                .panes
+                .iter()
+                .any(|pane| pane.tabs.iter().any(|tab| tab.unsaved.is_some()))
+    }
+
+    /// Apply an action chosen from the document tab strip.
+    fn apply_tab_action(&mut self, action: TabStripAction) {
+        match action {
+            TabStripAction::NewTab => self.new_note(),
+            TabStripAction::Activate(index) => {
+                self.switch_to_tab(self.workspace.focused, index);
+            }
+            TabStripAction::CloseOthers => {
+                self.stash_active_tab();
+                self.workspace.close_others();
+                self.load_active_tab();
+            }
+            TabStripAction::CloseToRight => {
+                self.stash_active_tab();
+                self.workspace.close_to_right();
+                self.load_active_tab();
+            }
+            TabStripAction::ReopenClosed => {
+                if self.workspace.reopen_closed().is_some() {
+                    self.load_active_tab();
+                }
+            }
+            TabStripAction::Close(index) => self.request_close_tab(index),
+        }
+    }
+
+    /// Close one tab, asking first when it is the active dirty tab.
+    fn request_close_tab(&mut self, index: usize) {
+        if index == self.workspace.focused_pane().active && self.dirty {
+            self.pending_action = Some(PendingAction::CloseDocument);
+            return;
+        }
+        let pane = self.workspace.focused;
+        self.stash_active_tab();
+        self.workspace.close_tab(pane, index);
+        self.load_active_tab();
+    }
+
+    /// Save the active buffer and every other tab with unsaved edits.
+    ///
+    /// Tabs keep their own buffers, so quitting must not only look at the
+    /// active note. Failures leave the buffer in place and are reported, so a
+    /// rejected write never looks like a successful save.
+    fn save_all_dirty_tabs(&mut self) {
+        self.save_document();
+
+        let mut pending: Vec<(PathBuf, String)> = Vec::new();
+        for pane in &mut self.workspace.panes {
+            for tab in &mut pane.tabs {
+                if let Some(buffer) = &tab.unsaved {
+                    pending.push((tab.path.clone(), buffer.clone()));
+                }
+            }
+        }
+
+        let mut failures = Vec::new();
+        {
+            let Some(vault) = self.vault.as_ref() else {
+                return;
+            };
+            for (path, buffer) in &pending {
+                if let Err(error) = vault.write(path, buffer) {
+                    failures.push(format!("{}: {error}", path.display()));
+                }
+            }
+        }
+
+        if failures.is_empty() {
+            for pane in &mut self.workspace.panes {
+                for tab in &mut pane.tabs {
+                    tab.unsaved = None;
+                }
+            }
+            self.rebuild_search_index();
+            self.panels.search.invalidate();
+            self.rebuild_graph();
+        } else {
+            self.external_change = Some(format!("Could not save: {}", failures.join("; ")));
+        }
+    }
+
     /// Resolve a pending action after the user chooses save/discard/cancel.
     fn finish_pending_action(&mut self, ctx: &egui::Context, save: bool) {
         let Some(action) = self.pending_action.take() else {
             return;
         };
         if save {
-            self.save_document();
+            match action {
+                PendingAction::Quit => self.save_all_dirty_tabs(),
+                PendingAction::CloseDocument => self.save_document(),
+            }
         }
         match action {
-            PendingAction::Open(path) => self.open_document(&path),
             PendingAction::CloseDocument => self.close_document_now(),
             PendingAction::Quit => {
                 self.dirty = false;
@@ -906,10 +1083,13 @@ impl eframe::App for EditorApp {
         reason = "single eframe update entry point wires the whole UI together"
     )]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Intercept window close when there are unsaved changes.
-        if ctx.input(|i| i.viewport().close_requested()) && self.dirty {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.pending_action = Some(PendingAction::Quit);
+        // Intercept window close when any tab has unsaved changes.
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.stash_active_tab();
+            if self.has_unsaved_tabs() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.pending_action = Some(PendingAction::Quit);
+            }
         }
 
         // Keep the window title in sync with the open document.
@@ -973,7 +1153,8 @@ impl eframe::App for EditorApp {
                         }
                     });
                     if ui.button("Quit").clicked() {
-                        if self.dirty {
+                        self.stash_active_tab();
+                        if self.has_unsaved_tabs() {
                             self.pending_action = Some(PendingAction::Quit);
                         } else {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1163,6 +1344,7 @@ impl eframe::App for EditorApp {
 
         // Central panel: editor split or graph view depending on active panel.
         let mut graph_moved = false;
+        let mut tab_action: Option<TabStripAction> = None;
         CentralPanel::default().show(ctx, |ui| {
             if self.panels.active == PanelId::Graph {
                 graph_moved = self.panels.graph.show(
@@ -1173,6 +1355,8 @@ impl eframe::App for EditorApp {
                     self.open_document.as_deref(),
                 );
             } else {
+                tab_action = document_tabs(ui, self.workspace.focused_pane(), self.dirty);
+                ui.separator();
                 self.panels.editor_split.show(
                     ui,
                     &self.open_document,
@@ -1184,6 +1368,9 @@ impl eframe::App for EditorApp {
                 );
             }
         });
+        if let Some(action) = tab_action {
+            self.apply_tab_action(action);
+        }
         if graph_moved {
             self.save_layout();
         }
@@ -1233,6 +1420,7 @@ impl eframe::App for EditorApp {
         self.state.save(storage);
         self.settings.save(storage);
         self.save_layout();
+        self.save_workspace();
     }
 
     fn auto_save_interval(&self) -> std::time::Duration {
@@ -1241,6 +1429,7 @@ impl eframe::App for EditorApp {
 
     fn on_exit(&mut self, _ctx: Option<&eframe::glow::Context>) {
         self.save_layout();
+        self.save_workspace();
     }
 }
 
@@ -1254,10 +1443,8 @@ pub enum ExportState {
 }
 
 /// Action waiting on unsaved-changes confirmation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum PendingAction {
-    /// Open another document after saving or discarding.
-    Open(PathBuf),
     /// Close the current document.
     CloseDocument,
     /// Close the application.

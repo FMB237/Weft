@@ -274,12 +274,27 @@ impl Workspace {
 
     /// Show `path` in the focused pane, reusing an existing tab when possible.
     ///
-    /// Returns the index of the visible tab. Opening the note that is already
-    /// visible is a no-op.
+    /// A note already open in either pane is focused instead of opening a
+    /// second tab, so its unsaved buffer is never lost.
     pub fn open(&mut self, path: impl Into<PathBuf>) -> usize {
         let path = path.into();
+        if let Some((pane, index)) = self.find_tab(&path) {
+            self.focused = pane;
+            self.panes[pane].activate(index);
+            return index;
+        }
         let pane_index = self.focused.min(self.panes.len().saturating_sub(1));
         self.open_in(pane_index, path)
+    }
+
+    /// Locate an open tab by path, returning its pane and index.
+    pub fn find_tab(&self, path: &Path) -> Option<(usize, usize)> {
+        self.panes.iter().enumerate().find_map(|(pane, tabs)| {
+            tabs.tabs
+                .iter()
+                .position(|tab| tab.path == path)
+                .map(|index| (pane, index))
+        })
     }
 
     /// Show `path` in a specific pane, reusing a tab in that pane when it is
@@ -483,22 +498,47 @@ impl Workspace {
 
     /// Drop tabs for a deleted file or directory.
     pub fn remove_path(&mut self, path: &Path) {
+        self.remove_path_keeping(path, None);
+    }
+
+    /// Drop tabs under `path`, except the tab at `keep` (pane, index).
+    ///
+    /// The exception exists for files deleted on disk while the tab still holds
+    /// unsaved edits: that buffer stays open so the user can save it back,
+    /// while every other tab for the deleted path is dropped.
+    pub fn remove_path_keeping(&mut self, path: &Path, keep: Option<(usize, usize)>) {
         let mut removed = Vec::new();
-        for pane in &mut self.panes {
-            let mut index = 0;
-            while index < pane.tabs.len() {
-                if pane.tabs[index].path == path || pane.tabs[index].path.starts_with(path) {
-                    removed.push(pane.tabs.remove(index));
+        for (pane_index, pane) in self.panes.iter_mut().enumerate() {
+            let kept = keep
+                .filter(|(keep_pane, _)| *keep_pane == pane_index)
+                .map(|(_, index)| index);
+            let active = pane.active;
+            let mut tabs = Vec::with_capacity(pane.tabs.len());
+            let mut active_in_kept = 0;
+            for (index, tab) in pane.tabs.drain(..).enumerate() {
+                let matches = tab.path == path || tab.path.starts_with(path);
+                if matches && kept != Some(index) {
+                    removed.push(tab);
                 } else {
-                    index += 1;
+                    if index == active {
+                        active_in_kept = tabs.len();
+                    }
+                    tabs.push(tab);
                 }
             }
-            pane.sanitize();
+            pane.active = active_in_kept.min(tabs.len().saturating_sub(1));
+            pane.tabs = tabs;
         }
-        if self.panes.is_empty() {
-            self.panes.push(Pane::new());
+
+        let mut index = 0;
+        while index < self.panes.len() {
+            if self.panes[index].is_empty() && self.panes.len() > 1 {
+                self.panes.remove(index);
+            } else {
+                index += 1;
+            }
         }
-        self.focused = self.focused.min(self.panes.len() - 1);
+        self.focused = self.focused.min(self.panes.len().saturating_sub(1));
         self.remember_closed(removed);
     }
 
@@ -638,6 +678,17 @@ mod tests {
         let mut workspace = ws(&["a.md"]);
         workspace.open_new("a.md");
         assert_eq!(workspace.tab_count(), 2);
+    }
+
+    #[test]
+    fn opening_a_note_open_in_the_other_pane_focuses_that_pane() {
+        let mut workspace = ws(&["a.md", "b.md"]);
+        workspace.split();
+        assert_eq!(workspace.focused, 1);
+        workspace.open("a.md");
+        assert_eq!(workspace.focused, 0);
+        assert_eq!(workspace.tab_count(), 2);
+        assert_eq!(workspace.find_tab(Path::new("a.md")), Some((0, 0)));
     }
 
     #[test]
@@ -787,6 +838,17 @@ mod tests {
         assert_eq!(workspace.tab_count(), 1);
         assert_eq!(workspace.active_path(), Some(Path::new("keep.md")));
         assert_eq!(workspace.closed.len(), 2);
+    }
+
+    #[test]
+    fn deletion_can_keep_the_dirty_active_tab() {
+        let mut workspace = ws(&["old/a.md", "old/b.md", "keep.md"]);
+        workspace.activate(1);
+        assert_eq!(workspace.active_path(), Some(Path::new("old/b.md")));
+        workspace.remove_path_keeping(Path::new("old"), Some((0, 1)));
+        assert_eq!(workspace.tab_count(), 2);
+        assert_eq!(workspace.active_path(), Some(Path::new("old/b.md")));
+        assert_eq!(workspace.closed.len(), 1);
     }
 
     #[test]

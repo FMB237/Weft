@@ -41,6 +41,8 @@ dispatches them once per frame.
 | `clustering.rs` | Label-propagation community detection used for graph colouring. |
 | `graph_queries.rs` | Backlinks, shortest path, centrality. |
 | `watcher.rs` | `notify` watcher on a background thread with debouncing; exposes a channel of `WatchEvent`s. |
+| `workspace.rs` | Panes, tabs, and session restore: open/close/reorder/split/merge, rename and delete propagation, atomic save to `<vault>/.weft/workspace.toml`, and sanitizing of restored state. |
+| `file_ops.rs` | `FileOps` trait over a vault plus `write_atomic` (temp file, `fsync`, rename). |
 | `plugins.rs` | Lifecycle-only plugin registry and dispatch. |
 | `export.rs` | Standalone HTML for one document (with escaped title) and a markdown bundle for a vault. |
 
@@ -59,7 +61,9 @@ non-GUI serializer and always writes TOML.
 ## weft-gui
 
 - `app.rs` — eframe entry point, persisted `AppState`, keyboard shortcuts,
-  dialog modals, panel layout, and the status bar.
+  dialog modals, panel layout, and the status bar. Owns the `Workspace` and
+  keeps the active tab's buffer in the editor fields; every other tab holds its
+  own unsaved buffer.
 - `theme.rs` — design tokens (`Palette`), light/dark/system resolution,
   `Theme::apply` (visuals, spacing, text styles), bundled Inter and
   `JetBrains Mono` fonts, and contrast helpers used by tests.
@@ -79,8 +83,11 @@ events after all panels have run. Repaints are requested only when needed
 
 - `<vault>/vault.toml` — vault name and markdown extensions.
 - `<vault>/.editor/layout.json` — graph node positions.
-- eframe storage — window/app state (`editor_app_state`) and preferences
-  (`editor_settings`), serialized as JSON.
+- `<vault>/.weft/workspace.toml` — panes, tabs, order, active tab, view mode,
+  cursor/scroll hints, and the split ratio. Unsaved buffers stay in memory.
+- eframe storage — window state (`editor_app_state`) and preferences
+  (`editor_settings`), serialized as JSON. `editor_app_state` also keeps the
+  last vault and note as a fallback for sessions saved before tabs existed.
 
 ## Planned modules (M4–M8)
 
@@ -99,11 +106,14 @@ weft-core/src/
   trash.rs        system trash with in-vault fallback
 
 weft-gui/src/
-  workspace.rs    panes, tabs, session restore
   nav.rs          per-pane back/forward history
   panels/outline.rs, panels/properties.rs
   panels/views/{table,cards,board,calendar,timeline}.rs
 ```
+
+The workspace model already landed in `weft-core/src/workspace.rs` (M4) rather
+than in the GUI: session restore is pure data, and keeping it in the core makes
+tab behaviour testable without egui.
 
 Rule: views are **data** (a filter/sort/group description in
 `.weft/views.toml`), evaluated by `weft-core`; the GUI only renders results.

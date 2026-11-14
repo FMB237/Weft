@@ -229,13 +229,18 @@ recoverable before anything can bulk-edit the vault.
 
 **Tabs and panes**
 
-- [ ] `workspace.rs`: `Pane { tabs, active }`, one or two panes, horizontal and
-      vertical split, drag a tab between panes, overflow menu.
-- [ ] Tab ops: new (`Ctrl+T`), close (`Ctrl+W`), cycle (`Ctrl+Tab`), reopen
-      closed (`Ctrl+Shift+T`), close others / close to the right.
-- [ ] Tabs are `(path, mode, cursor, scroll)`; two tabs on one note are legal.
-- [ ] Session restore writes the whole workspace (panes, tabs, order, active,
-      split ratio) to `.weft/workspace.toml` instead of one `open_document`.
+- [x] `workspace.rs` (in `weft-core`): `Pane { tabs, active }`, one or two
+      panes, horizontal and vertical split, `move_tab`, `close_others`, and
+      `close_to_right`. Split/merge and tab drag are model operations; the
+      two-pane UI and drag gesture are still pending.
+- [x] Tab ops: new (`Ctrl+T`), close (`Ctrl+W`), cycle (`Ctrl+Tab`), reopen
+      closed (`Ctrl+Shift+T`), close others / close to the right (tab context
+      menu).
+- [x] Tabs are `(path, mode, cursor, scroll)`; two tabs on one note are legal,
+      and unsaved buffers live on the tab so switching is lossless.
+- [x] Session restore writes the whole workspace (panes, tabs, order, active,
+      split ratio) to `.weft/workspace.toml` instead of one `open_document`;
+      writes are atomic and unsafe paths are rejected on load.
 - [ ] `nav.rs`: per-pane back/forward stack (`Alt+Left/Right`, mouse buttons),
       entries carry cursor and scroll, not just a path.
 - [ ] Breadcrumbs in the editor header: `vault / folder / note.md`.
