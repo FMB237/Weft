@@ -29,15 +29,51 @@ impl EditorMetrics {
     }
 }
 
+/// The live editor state of one pane: what it shows and where the user is.
+///
+/// One buffer per pane, not per tab: tabs keep their unsaved text, and a pane
+/// only holds the tab it is showing. Hints (`cursor`, `scroll`, `selection`,
+/// `scroll_to`) are one-shot requests applied on the next frame and cleared.
+#[derive(Debug, Default)]
+pub struct EditorBuffer {
+    /// Vault-relative path of the visible note.
+    pub document: Option<PathBuf>,
+    /// Live text, including unsaved edits.
+    pub content: String,
+    /// Whether `content` differs from what is on disk.
+    pub dirty: bool,
+    /// Caret to place on the next frame.
+    pub cursor: Option<usize>,
+    /// Scroll offset to apply on the next frame.
+    pub scroll: Option<f32>,
+    /// Selection to place on the next frame, in character indices.
+    pub selection: Option<(usize, usize)>,
+    /// Character offset to bring to the top of the editor on the next frame.
+    pub scroll_to: Option<usize>,
+}
+
+impl EditorBuffer {
+    /// Forget the visible note and drop every hint.
+    pub fn reset(&mut self) {
+        self.document = None;
+        self.content.clear();
+        self.dirty = false;
+        self.cursor = None;
+        self.scroll = None;
+        self.selection = None;
+        self.scroll_to = None;
+    }
+}
+
 #[derive(Debug)]
 pub struct MarkdownEditor {
     highlighter: SyntaxHighlighter,
 }
 
 impl MarkdownEditor {
-    /// Stable id of the text edit for `path`, so callers can move focus to it.
-    pub fn text_id(path: &std::path::Path) -> Id {
-        Id::new("markdown_editor").with(path)
+    /// Stable id of a pane's text edit for `path`, so callers can focus it.
+    pub fn text_id(pane: usize, path: &std::path::Path) -> Id {
+        Id::new("markdown_editor").with(pane).with(path)
     }
 
     pub fn new() -> Self {
@@ -46,36 +82,27 @@ impl MarkdownEditor {
         }
     }
 
-    /// Render the editor for the currently open document.
+    /// Render the editor for the buffer's visible note.
     ///
-    /// `cursor`, `scroll`, `selection`, and `scroll_to` are one-shot hints:
-    /// when set they place the caret, scroll position, or selection for this
-    /// frame and are cleared, so a tab switch, a back/forward jump, or a click
-    /// in the outline lands where the user asked.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the editor takes the shared document state explicitly"
-    )]
+    /// The buffer's hints are one-shot: when set they place the caret, scroll
+    /// position, or selection for this frame and are cleared, so a tab switch,
+    /// a back/forward jump, or a click in the outline lands where the user
+    /// asked.
     pub fn show(
         &mut self,
+        pane: usize,
         ui: &mut Ui,
-        open_document: &Option<PathBuf>,
-        document_content: &mut String,
-        dirty: &mut bool,
+        buffer: &mut EditorBuffer,
         _ctx: &egui::Context,
         font_size: f32,
-        cursor: &mut Option<usize>,
-        scroll: &mut Option<f32>,
-        selection: &mut Option<(usize, usize)>,
-        scroll_to: &mut Option<usize>,
     ) -> EditorMetrics {
-        let Some(path) = open_document else {
+        let Some(path) = buffer.document.clone() else {
             ui.label("No document open.");
             ui.separator();
             ui.label("Select a file from the sidebar to start editing.");
             return EditorMetrics::default();
         };
-        let text_id = Self::text_id(path);
+        let text_id = Self::text_id(pane, &path);
 
         let base_format = TextFormat {
             font_id: FontId::proportional(font_size),
@@ -105,13 +132,13 @@ impl MarkdownEditor {
             ui.fonts(|fonts| fonts.layout_job(job))
         };
 
-        if let Some(index) = cursor.take() {
+        if let Some(index) = buffer.cursor.take() {
             let mut state = TextEdit::load_state(ui.ctx(), text_id).unwrap_or_default();
             let range = CCursorRange::one(CCursor::new(index));
             state.cursor.set_char_range(Some(range));
             state.store(ui.ctx(), text_id);
         }
-        if let Some((start, end)) = selection.take() {
+        if let Some((start, end)) = buffer.selection.take() {
             let mut state = TextEdit::load_state(ui.ctx(), text_id).unwrap_or_default();
             let range = CCursorRange::two(CCursor::new(start), CCursor::new(end));
             state.cursor.set_char_range(Some(range));
@@ -121,19 +148,19 @@ impl MarkdownEditor {
         let mut area = egui::ScrollArea::vertical()
             .id_salt(text_id.with("scroll"))
             .auto_shrink([false; 2]);
-        if let Some(offset) = scroll.take() {
+        if let Some(offset) = buffer.scroll.take() {
             area = area.vertical_scroll_offset(offset.max(0.0));
         }
 
         let output = area.show(ui, |ui| {
-            let text_output = TextEdit::multiline(document_content)
+            let text_output = TextEdit::multiline(&mut buffer.content)
                 .id(text_id)
                 .font(FontId::proportional(font_size))
                 .desired_width(f32::INFINITY)
                 .desired_rows(1)
                 .layouter(&mut layouter)
                 .show(ui);
-            if let Some(target) = scroll_to.take()
+            if let Some(target) = buffer.scroll_to.take()
                 && let Some(row) = row_for_char(&text_output.galley, target)
             {
                 // Scrolling the row to the top is what an outline click means;
@@ -151,10 +178,10 @@ impl MarkdownEditor {
         });
 
         if output.inner.response.changed() {
-            *dirty = true;
+            buffer.dirty = true;
         }
 
-        if *dirty {
+        if buffer.dirty {
             ui.colored_label(egui::Color32::from_rgb(220, 140, 50), "unsaved changes");
         }
 

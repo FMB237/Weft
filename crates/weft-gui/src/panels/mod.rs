@@ -12,7 +12,6 @@ pub mod preview;
 pub mod search;
 
 use crate::panels::backlinks::BacklinksPanel;
-use crate::panels::editor_split::EditorSplitPanel;
 use crate::panels::file_tree::FileTreePanel;
 use crate::panels::graph::GraphPanel;
 use crate::panels::outline::OutlinePanel;
@@ -41,8 +40,6 @@ pub struct Panels {
     pub active: PanelId,
     /// Left side panel: file tree.
     pub file_tree: FileTreePanel,
-    /// Central panel: editor + preview split.
-    pub editor_split: EditorSplitPanel,
     /// Right side panel: preview.
     pub preview: PreviewPanel,
     /// Graph visualization panel (Phase 5 placeholder).
@@ -67,7 +64,6 @@ impl Panels {
         Self {
             active: PanelId::default(),
             file_tree: FileTreePanel::new(),
-            editor_split: EditorSplitPanel::new(),
             preview: PreviewPanel::new(),
             graph: GraphPanel::new(),
             search: SearchPanel::new(),
