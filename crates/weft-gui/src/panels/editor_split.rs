@@ -80,9 +80,21 @@ impl EditorSplitPanel {
         let split_ratio = self.split_ratio.clamp(0.0, 1.0);
         let preview_width = (total_width * (1.0 - split_ratio)).clamp(min_pane, max_preview);
 
+        // egui remembers a panel's absolute width. A width remembered from a
+        // wider layout (before a split opened, or after the window grew)
+        // would swallow the editor, so drop it whenever it no longer matches
+        // the ratio and let `default_width` place the divider again.
+        let split_id = egui::Id::new(("editor_preview_split", pane));
+        if let Some(state) = egui::containers::panel::PanelState::load(ui.ctx(), split_id)
+            && (state.size().x - preview_width).abs() > 1.0
+        {
+            ui.ctx()
+                .data_mut(|data| data.remove::<egui::containers::panel::PanelState>(split_id));
+        }
+
         // Draggable divider: the preview pane owns the right side, and the
         // editor fills the remaining space.
-        let response = egui::SidePanel::right(egui::Id::new(("editor_preview_split", pane)))
+        let response = egui::SidePanel::right(split_id)
             .resizable(true)
             .default_width(preview_width)
             .width_range(min_pane..=max_preview)

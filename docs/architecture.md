@@ -67,9 +67,12 @@ non-GUI serializer and always writes TOML.
 ## weft-gui
 
 - `app.rs` — eframe entry point, persisted `AppState`, keyboard shortcuts,
-  dialog modals, panel layout, and the status bar. Owns the `Workspace` and
-  keeps the active tab's buffer in the editor fields; every other tab holds its
-  own unsaved buffer.
+  dialog modals, panel layout, and the status bar. Owns the `Workspace` and a
+  `views: Vec<PaneView>` aligned with its panes: each `PaneView` holds that
+  pane's `EditorSplitPanel`, `EditorBuffer` (document, text, dirty flag, and
+  one-shot caret/scroll hints), and the metrics from its last rendered frame.
+  `sync_panes` keeps the two in step, and `buffer()`/`buffer_mut()` reach the
+  focused pane, so a tab switch reloads one pane without touching the other.
 - `theme.rs` — design tokens (`Palette`), light/dark/system resolution,
   `Theme::apply` (visuals, spacing, text styles), bundled Inter and
   `JetBrains Mono` fonts, and contrast helpers used by tests.
@@ -79,7 +82,9 @@ non-GUI serializer and always writes TOML.
   layout.
 - `widgets/graph_canvas.rs` — custom-painted graph with pan/zoom, hover,
   selection, cluster colouring, and theme-aware colours.
-- `panels/` — file tree, editor/preview split, graph, search, and backlinks.
+- `panels/` — file tree, editor/preview split, graph, search, backlinks, and
+  outline. `EditorSplitPanel` is instantiated per pane by `app.rs` rather than
+  held in `Panels`, so each pane keeps its own editor/preview divider.
 
 Rendering is immediate-mode: each frame reads app state, draws, and dispatches
 events after all panels have run. Repaints are requested only when needed

@@ -21,6 +21,12 @@ a separate, GUI-independent core crate.
   switching or closing never silently drops edits. `Ctrl+W` closes,
   `Ctrl+Tab` cycles, `Ctrl+Shift+T` reopens the last closed tab, and the tab
   context menu closes others or everything to the right.
+- **Split panes:** View > Split Right or Split Down opens a second pane, and
+  the tab context menu moves a tab across. Each pane has its own tab strip,
+  editor buffer, preview divider, caret, and back/forward history; a click
+  moves keyboard focus, the accent dot marks the focused pane, and View >
+  Close Pane merges the panes back into one. The divider is draggable, and the
+  layout is restored on launch.
 - **Editor:** syntax-highlighted Markdown editing with configurable font size,
   dirty-state indicator, and save-on-demand or timed auto-save. Editor and
   graph share one window through tabs. Each tab remembers its caret and scroll

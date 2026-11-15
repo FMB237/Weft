@@ -18,7 +18,7 @@ use weft_core::nav::{NavEntry, NavHistory};
 
 use weft_core::vault::Vault;
 use weft_core::watcher::{WatchEvent, WatchHandle};
-use weft_core::workspace::{Pane, Workspace};
+use weft_core::workspace::{MAX_PANES, Pane, SplitAxis, Workspace};
 
 use eframe::Storage;
 use egui::{CentralPanel, Key, SidePanel, TopBottomPanel};
@@ -165,6 +165,8 @@ pub struct EditorApp {
     focus_editor: bool,
     /// Whether the outline panel is shown.
     outline_open: bool,
+    /// Pane whose editor should take keyboard focus next frame.
+    pending_focus: Option<usize>,
     /// Whether the quick switcher is open.
     quick_open: bool,
     /// Quick switcher query.
@@ -256,6 +258,7 @@ impl EditorApp {
             find_focus: false,
             focus_editor: false,
             outline_open: false,
+            pending_focus: None,
             quick_open: false,
             quick_input: String::new(),
             quick_pool: Vec::new(),
@@ -374,6 +377,9 @@ impl EditorApp {
         }
         self.views.truncate(pane_count);
         self.nav.truncate(pane_count);
+        // A pane that emptied and closed leaves `focused` pointing past the
+        // end; normalize it so it is not persisted out of range.
+        self.workspace.focused = self.pane_index();
     }
 
     /// Index of the pane that has focus.
@@ -803,6 +809,127 @@ impl EditorApp {
         self.last_auto_save = std::time::Instant::now();
     }
 
+    /// Render one pane: the tab strip, the find bar when it owns focus, and
+    /// the editor split.
+    ///
+    /// Returns the tab action the user picked, so the caller can apply it
+    /// after all panes are drawn (a tab action may reload any pane).
+    fn show_pane(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        pane: usize,
+    ) -> Option<TabStripAction> {
+        // A click anywhere in the pane moves focus here. The click may be
+        // consumed by the text editor, a tab, or a scrollbar, so this is a
+        // position test rather than an interaction.
+        let pane_rect = ui.available_rect_before_wrap();
+
+        let palette = palette(ui.ctx());
+        let dirty = self.views[pane].buffer.dirty;
+        let can_move = self.views.len() > 1;
+        let action = ui
+            .horizontal(|ui| {
+                if pane == self.pane_index() {
+                    // A small accent dot marks the pane that has the keyboard.
+                    ui.label(egui::RichText::new("●").size(9.0).color(palette.accent));
+                }
+                document_tabs(ui, pane, &self.workspace.panes[pane], dirty, can_move)
+            })
+            .inner;
+        if pane == self.pane_index() {
+            self.render_find_bar(ui);
+        }
+        ui.separator();
+
+        let breadcrumbs = self.breadcrumbs_for(pane);
+        let PaneView {
+            split,
+            buffer,
+            metrics,
+            rendered,
+        } = &mut self.views[pane];
+        *metrics = Some(split.show(pane, ui, buffer, ctx, self.settings.font_size, &breadcrumbs));
+        rendered.clone_from(&buffer.document);
+        let clicked = !ui.memory(egui::Memory::any_popup_open)
+            && ui.input(|input| {
+                input.pointer.any_pressed()
+                    && input
+                        .pointer
+                        .interact_pos()
+                        .is_some_and(|pos| pane_rect.contains(pos))
+            });
+        if clicked {
+            self.focus_pane(pane);
+        }
+        action
+    }
+
+    /// Render the second pane as a resizable panel beside or below the first.
+    fn show_second_pane(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        actions: &mut Vec<(usize, TabStripAction)>,
+    ) {
+        let available = ui.available_size();
+        let ratio = self.workspace.split_ratio.clamp(0.2, 0.8);
+        let mut pane_action = None;
+        // A remembered panel size from before a resize would override the
+        // persisted ratio, so drop it when it disagrees.
+        let split_id = egui::Id::new("workspace_split");
+        let desired = match self.workspace.axis {
+            SplitAxis::Horizontal => available.x * (1.0 - ratio),
+            SplitAxis::Vertical => available.y * (1.0 - ratio),
+        };
+        let horizontal = self.workspace.axis == SplitAxis::Horizontal;
+        if let Some(state) = egui::containers::panel::PanelState::load(ctx, split_id) {
+            let actual = if horizontal {
+                state.size().x
+            } else {
+                state.size().y
+            };
+            if (actual - desired).abs() > 1.0 {
+                ctx.data_mut(|data| {
+                    data.remove::<egui::containers::panel::PanelState>(split_id);
+                });
+            }
+        }
+        match self.workspace.axis {
+            SplitAxis::Horizontal => {
+                let range = (available.x * 0.2).max(140.0)..=(available.x * 0.8).max(280.0);
+                let response = egui::SidePanel::right(split_id)
+                    .resizable(true)
+                    .default_width(available.x * (1.0 - ratio))
+                    .width_range(range)
+                    .show_inside(ui, |ui| {
+                        pane_action = self.show_pane(ui, ctx, 1);
+                    });
+                if available.x > 0.0 {
+                    self.workspace.split_ratio =
+                        (1.0 - response.response.rect.width() / available.x).clamp(0.2, 0.8);
+                }
+            }
+            SplitAxis::Vertical => {
+                let range = (available.y * 0.2).max(120.0)..=(available.y * 0.8).max(240.0);
+                let response = egui::TopBottomPanel::bottom(egui::Id::new("workspace_split"))
+                    .resizable(true)
+                    .default_height(available.y * (1.0 - ratio))
+                    .height_range(range)
+                    .show_inside(ui, |ui| {
+                        pane_action = self.show_pane(ui, ctx, 1);
+                    });
+                if available.y > 0.0 {
+                    self.workspace.split_ratio =
+                        (1.0 - response.response.rect.height() / available.y).clamp(0.2, 0.8);
+                }
+            }
+        }
+        if let Some(action) = pane_action {
+            actions.push((1, action));
+        }
+    }
+
     /// Process pending events from the cross-panel event bus.
     ///
     /// This runs once per frame after panel rendering, so events published
@@ -1094,9 +1221,13 @@ impl EditorApp {
         self.record_nav_visit();
     }
 
-    /// `vault / folder / note.md` for the editor header.
-    fn breadcrumbs(&self) -> Vec<String> {
-        let Some(path) = self.open_path() else {
+    /// `vault / folder / note.md` for one pane's editor header.
+    fn breadcrumbs_for(&self, pane: usize) -> Vec<String> {
+        let Some(path) = self
+            .views
+            .get(pane)
+            .and_then(|view| view.buffer.document.as_deref())
+        else {
             return Vec::new();
         };
         let mut crumbs = Vec::new();
@@ -1136,6 +1267,54 @@ impl EditorApp {
                 .any(|pane| pane.tabs.iter().any(|tab| tab.unsaved.is_some()))
     }
 
+    /// Move keyboard focus to a pane and keep the caret in its editor.
+    fn focus_pane(&mut self, pane: usize) {
+        if self.workspace.focused == pane {
+            return;
+        }
+        self.workspace.focused = pane;
+        self.sync_panes();
+        self.pending_focus = Some(pane);
+        self.record_nav_visit();
+    }
+
+    /// Give keyboard focus to a pane's text editor.
+    fn focus_editor(&self, ctx: &egui::Context, pane: usize) {
+        let Some(path) = self
+            .views
+            .get(pane)
+            .and_then(|view| view.buffer.document.clone())
+        else {
+            return;
+        };
+        let id = crate::widgets::MarkdownEditor::text_id(pane, &path);
+        ctx.memory_mut(|memory| memory.request_focus(id));
+    }
+
+    /// Split the central area, moving the active tab into the new pane.
+    fn split_pane(&mut self, axis: SplitAxis) {
+        self.stash_active_tab();
+        self.workspace.axis = axis;
+        self.workspace.split_ratio = 0.5;
+        if self.workspace.split() {
+            self.sync_panes();
+            self.reload_panes();
+            self.pending_focus = Some(self.pane_index());
+            self.record_nav_visit();
+        }
+    }
+
+    /// Close the focused pane, keeping its tabs in the remaining one.
+    fn merge_pane(&mut self) {
+        self.stash_active_tab();
+        if self.workspace.merge() {
+            self.sync_panes();
+            self.reload_panes();
+            self.pending_focus = Some(self.pane_index());
+            self.record_nav_visit();
+        }
+    }
+
     /// Apply an action chosen from the document tab strip.
     fn apply_tab_action(&mut self, pane: usize, action: TabStripAction) {
         self.workspace.focused = pane;
@@ -1163,8 +1342,29 @@ impl EditorApp {
                     self.record_nav_visit();
                 }
             }
+            TabStripAction::MoveToOtherPane(index) => self.move_tab_to_other_pane(pane, index),
             TabStripAction::Close(index) => self.request_close_tab(pane, index),
         }
+    }
+
+    /// Move a tab into the other pane, focusing it there.
+    fn move_tab_to_other_pane(&mut self, pane: usize, index: usize) {
+        let Some(other) = (0..self.workspace.panes.len()).find(|candidate| *candidate != pane)
+        else {
+            return;
+        };
+        self.stash_pane(pane);
+        let target = self.workspace.panes[other].tabs.len();
+        if !self.workspace.move_tab(pane, index, other, target) {
+            return;
+        }
+        // The core closes the source pane when its last tab leaves, so the
+        // target is not necessarily `other` any more.
+        self.workspace.focused = other.min(self.workspace.panes.len().saturating_sub(1));
+        self.sync_panes();
+        self.load_all_panes();
+        self.pending_focus = Some(self.pane_index());
+        self.record_nav_visit();
     }
 
     /// Close one tab, asking first when it is the active dirty tab.
@@ -1955,6 +2155,12 @@ impl eframe::App for EditorApp {
     )]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sync_panes();
+        // Focus is requested one frame late: accesskit panics when the focused
+        // id was not part of the previous frame's tree, and a pane that just
+        // gained a note has not rendered it yet.
+        if let Some(pane) = self.pending_focus.take() {
+            self.focus_editor(ctx, pane);
+        }
 
         // Intercept window close when any tab has unsaved changes.
         if ctx.input(|i| i.viewport().close_requested()) {
@@ -2078,6 +2284,32 @@ impl eframe::App for EditorApp {
                     ui.separator();
                     if ui.selectable_label(self.outline_open, "Outline").clicked() {
                         self.outline_open = !self.outline_open;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    let can_split = self.workspace.panes.len() < MAX_PANES;
+                    if ui
+                        .add_enabled(can_split, egui::Button::new("Split Right"))
+                        .clicked()
+                    {
+                        self.split_pane(SplitAxis::Horizontal);
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add_enabled(can_split, egui::Button::new("Split Down"))
+                        .clicked()
+                    {
+                        self.split_pane(SplitAxis::Vertical);
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add_enabled(
+                            self.workspace.panes.len() > 1,
+                            egui::Button::new("Close Pane"),
+                        )
+                        .clicked()
+                    {
+                        self.merge_pane();
                         ui.close_menu();
                     }
                     if ui.button("Find in Note\tCtrl+F").clicked() {
@@ -2290,10 +2522,8 @@ impl eframe::App for EditorApp {
 
         // Central panel: editor split or graph view depending on active panel.
         let mut graph_moved = false;
-        let mut tab_action: Option<TabStripAction> = None;
+        let mut tab_actions: Vec<(usize, TabStripAction)> = Vec::new();
         self.sync_panes();
-        let focused = self.pane_index();
-        let breadcrumbs = self.breadcrumbs();
         let open_path = self.open_path().map(Path::to_path_buf);
         CentralPanel::default().show(ctx, |ui| {
             if self.panels.active == PanelId::Graph {
@@ -2305,36 +2535,25 @@ impl eframe::App for EditorApp {
                     open_path.as_deref(),
                 );
             } else {
-                let dirty = self.views[focused].buffer.dirty;
-                tab_action = document_tabs(ui, &self.workspace.panes[focused], dirty);
-                self.render_find_bar(ui);
-                ui.separator();
-                let PaneView {
-                    split,
-                    buffer,
-                    metrics,
-                    rendered,
-                } = &mut self.views[focused];
-                *metrics = Some(split.show(
-                    focused,
-                    ui,
-                    buffer,
-                    ctx,
-                    self.settings.font_size,
-                    &breadcrumbs,
-                ));
-                rendered.clone_from(&buffer.document);
+                // The second pane takes its share of the central area, so the
+                // first pane keeps the space that is left.
+                if self.views.len() > 1 {
+                    self.show_second_pane(ui, ctx, &mut tab_actions);
+                }
+                if let Some(action) = self.show_pane(ui, ctx, 0) {
+                    tab_actions.push((0, action));
+                }
             }
         });
         self.editor_split_ratio = self.views[0].split.split_ratio;
-        if let Some(action) = tab_action {
-            self.apply_tab_action(focused, action);
+        for (pane, action) in tab_actions {
+            self.apply_tab_action(pane, action);
         }
         self.record_positions();
         if self.focus_editor
             && let Some(path) = self.buffer().document.clone()
         {
-            let id = crate::widgets::MarkdownEditor::text_id(focused, &path);
+            let id = crate::widgets::MarkdownEditor::text_id(self.pane_index(), &path);
             ctx.memory_mut(|memory| memory.request_focus(id));
             self.focus_editor = false;
         }

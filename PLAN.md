@@ -229,8 +229,14 @@ recoverable before anything can bulk-edit the vault.
 
 - [x] `workspace.rs` (in `weft-core`): `Pane { tabs, active }`, one or two
       panes, horizontal and vertical split, `move_tab`, `close_others`, and
-      `close_to_right`. Split/merge and tab drag are model operations; the
-      two-pane UI and drag gesture are still pending.
+      `close_to_right`.
+- [x] Two-pane UI: both panes render side by side or stacked (View > Split
+      Right / Split Down), each with its own tab strip, editor buffer, preview
+      split, caret and history. A click moves focus (accent dot marks the
+      focused pane), View > Close Pane merges it back, and the tab context
+      menu moves a tab across. The split divider is draggable and persisted.
+      Tab drag-and-drop between panes is still pending; move-to-pane covers
+      it for now.
 - [x] Tab ops: new (`Ctrl+T`), close (`Ctrl+W`), cycle (`Ctrl+Tab`), reopen
       closed (`Ctrl+Shift+T`), close others / close to the right (tab context
       menu).

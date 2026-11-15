@@ -48,6 +48,8 @@ pub enum TabStripAction {
     Activate(usize),
     /// Close a tab.
     Close(usize),
+    /// Move a tab into the other pane.
+    MoveToOtherPane(usize),
     /// Close every tab except the active one.
     CloseOthers,
     /// Close every tab to the right of the active one.
@@ -62,15 +64,17 @@ pub enum TabStripAction {
 /// right-click menu. Returns the action the user picked, if any.
 pub fn document_tabs(
     ui: &mut Ui,
+    pane_index: usize,
     pane: &weft_core::workspace::Pane,
     active_dirty: bool,
+    can_move: bool,
 ) -> Option<TabStripAction> {
     let palette = palette(ui.ctx());
     let mut action = None;
 
     ui.horizontal(|ui| {
         egui::ScrollArea::horizontal()
-            .id_salt("document_tab_strip")
+            .id_salt(("document_tab_strip", pane_index))
             .max_height(30.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -111,6 +115,10 @@ pub fn document_tabs(
                             }
                             if ui.button("Reopen closed tab").clicked() {
                                 action = Some(TabStripAction::ReopenClosed);
+                                ui.close_menu();
+                            }
+                            if can_move && ui.button("Move to other pane").clicked() {
+                                action = Some(TabStripAction::MoveToOtherPane(index));
                                 ui.close_menu();
                             }
                         });
