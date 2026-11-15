@@ -113,8 +113,7 @@ structure on top of plain notes*. That is the gap Weft closes in M5.
 
 - Tabs, session restore, back/forward, per-note cursor/scroll restore, and
   breadcrumbs landed in M4. Split *panes* are modelled but not yet rendered.
-- The quick switcher and find & replace landed in M4; the outline panel has
-  not.
+- The quick switcher, find & replace, and the outline panel landed in M4.
 - No `[[` or `#tag` autocomplete.
 - Wikilinks are not clickable in preview; they render as literal text.
 - Trash, recovery snapshots, and atomic writes landed in M4. Crash recovery of
@@ -249,8 +248,10 @@ recoverable before anything can bulk-edit the vault.
 
 **Find and open**
 
-- [ ] Outline panel: headings from the parser, active-heading highlight,
-      click-to-scroll, filter box.
+- [x] Outline panel (View > Outline): ATX headings from the live buffer via
+      `outline.rs`, indented by level, with the section containing the caret
+      highlighted, a filter box, and click-to-scroll. Fenced code, frontmatter,
+      and `#tag` lines are not headings.
 - [x] `Ctrl+O` is the quick switcher (open vault moved to `Ctrl+Shift+O`):
       fuzzy over the path, ranked so word-boundary and early matches win;
       open tabs first, then the vault; `Enter` opens, `Esc` closes, arrows

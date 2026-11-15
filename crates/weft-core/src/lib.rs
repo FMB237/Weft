@@ -17,6 +17,7 @@ pub mod index;
 pub mod layout;
 pub mod layout_store;
 pub mod nav;
+pub mod outline;
 pub mod parser;
 pub mod plugins;
 pub mod trash;

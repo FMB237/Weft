@@ -7,6 +7,7 @@ pub mod backlinks;
 pub mod editor_split;
 pub mod file_tree;
 pub mod graph;
+pub mod outline;
 pub mod preview;
 pub mod search;
 
@@ -14,6 +15,7 @@ use crate::panels::backlinks::BacklinksPanel;
 use crate::panels::editor_split::EditorSplitPanel;
 use crate::panels::file_tree::FileTreePanel;
 use crate::panels::graph::GraphPanel;
+use crate::panels::outline::OutlinePanel;
 use crate::panels::preview::PreviewPanel;
 use crate::panels::search::SearchPanel;
 use serde::{Deserialize, Serialize};
@@ -49,6 +51,8 @@ pub struct Panels {
     pub search: SearchPanel,
     /// Backlinks for the open note.
     pub backlinks: BacklinksPanel,
+    /// Headings of the open note.
+    pub outline: OutlinePanel,
 }
 
 impl Default for Panels {
@@ -68,6 +72,7 @@ impl Panels {
             graph: GraphPanel::new(),
             search: SearchPanel::new(),
             backlinks: BacklinksPanel::new(),
+            outline: OutlinePanel::new(),
         }
     }
 

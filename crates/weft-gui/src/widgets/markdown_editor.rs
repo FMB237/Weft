@@ -48,9 +48,10 @@ impl MarkdownEditor {
 
     /// Render the editor for the currently open document.
     ///
-    /// `cursor` and `scroll` are one-shot restore hints: when set, they place
-    /// the caret or scroll position for this frame and are cleared, so a tab
-    /// switch or a back/forward jump lands where the user left off.
+    /// `cursor`, `scroll`, `selection`, and `scroll_to` are one-shot hints:
+    /// when set they place the caret, scroll position, or selection for this
+    /// frame and are cleared, so a tab switch, a back/forward jump, or a click
+    /// in the outline lands where the user asked.
     #[expect(
         clippy::too_many_arguments,
         reason = "the editor takes the shared document state explicitly"
@@ -66,6 +67,7 @@ impl MarkdownEditor {
         cursor: &mut Option<usize>,
         scroll: &mut Option<f32>,
         selection: &mut Option<(usize, usize)>,
+        scroll_to: &mut Option<usize>,
     ) -> EditorMetrics {
         let Some(path) = open_document else {
             ui.label("No document open.");
@@ -124,13 +126,28 @@ impl MarkdownEditor {
         }
 
         let output = area.show(ui, |ui| {
-            TextEdit::multiline(document_content)
+            let text_output = TextEdit::multiline(document_content)
                 .id(text_id)
                 .font(FontId::proportional(font_size))
                 .desired_width(f32::INFINITY)
                 .desired_rows(1)
                 .layouter(&mut layouter)
-                .show(ui)
+                .show(ui);
+            if let Some(target) = scroll_to.take()
+                && let Some(row) = row_for_char(&text_output.galley, target)
+            {
+                // Scrolling the row to the top is what an outline click means;
+                // egui only scrolls to the caret while the user is typing.
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(
+                        text_output.galley_pos.x,
+                        text_output.galley_pos.y + row.rect.top(),
+                    ),
+                    egui::vec2(1.0, row.rect.height()),
+                );
+                ui.scroll_to_rect(rect, Some(egui::Align::TOP));
+            }
+            text_output
         });
 
         if output.inner.response.changed() {
@@ -167,6 +184,20 @@ impl Default for MarkdownEditor {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The laid-out row that contains character offset `target`.
+fn row_for_char(galley: &egui::Galley, target: usize) -> Option<&egui::epaint::text::Row> {
+    let mut start = 0;
+    for row in &galley.rows {
+        // A newline is not painted as a glyph but still counts as a character.
+        let length = row.glyphs.len() + usize::from(row.ends_with_newline);
+        if target < start + length {
+            return Some(row);
+        }
+        start += length;
+    }
+    galley.rows.last()
 }
 
 #[cfg(test)]

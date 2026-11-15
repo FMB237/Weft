@@ -52,6 +52,10 @@ a separate, GUI-independent core crate.
 - **Quick switch:** `Ctrl+O` opens a fuzzy note list (open tabs first, then the
   whole vault). Type a few characters of the name or path, arrow through the
   matches, and press Enter.
+- **Outline:** View > Outline opens a side panel listing the note's headings,
+  indented by level and updated as you type. The section holding the caret is
+  highlighted; clicking a heading scrolls the editor to it; a filter box
+  narrows the list.
 - **Find and replace:** `Ctrl+F` opens a find bar over the editor with match
   count, case toggle, Previous/Next (wrapping), Replace, and Replace all. Vault
   search moved to `Ctrl+Shift+F`.

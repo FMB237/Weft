@@ -46,6 +46,7 @@ impl EditorSplitPanel {
         cursor: &mut Option<usize>,
         scroll: &mut Option<f32>,
         selection: &mut Option<(usize, usize)>,
+        scroll_to: &mut Option<usize>,
     ) -> EditorMetrics {
         let palette = palette(ui.ctx());
         if open_document.is_none() {
@@ -116,6 +117,7 @@ impl EditorSplitPanel {
             cursor,
             scroll,
             selection,
+            scroll_to,
         )
     }
 

@@ -151,6 +151,10 @@ pub struct EditorApp {
     /// Whether the editor should take keyboard focus this frame, so the
     /// selected match is visibly highlighted.
     focus_editor: bool,
+    /// Character offset to bring to the top of the editor this frame.
+    scroll_to_char: Option<usize>,
+    /// Whether the outline panel is shown.
+    outline_open: bool,
     /// Whether the quick switcher is open.
     quick_open: bool,
     /// Quick switcher query.
@@ -251,6 +255,8 @@ impl EditorApp {
             find_focus: false,
             pending_selection: None,
             focus_editor: false,
+            scroll_to_char: None,
+            outline_open: false,
             quick_open: false,
             quick_input: String::new(),
             quick_pool: Vec::new(),
@@ -1912,6 +1918,10 @@ impl eframe::App for EditorApp {
                         ui.close_menu();
                     }
                     ui.separator();
+                    if ui.selectable_label(self.outline_open, "Outline").clicked() {
+                        self.outline_open = !self.outline_open;
+                        ui.close_menu();
+                    }
                     if ui.button("Find in Note\tCtrl+F").clicked() {
                         self.open_find_bar();
                         ui.close_menu();
@@ -2088,6 +2098,25 @@ impl eframe::App for EditorApp {
             );
         });
 
+        // Right side panel: the outline of the open note.
+        if self.outline_open {
+            let cursor = self.editor_metrics.and_then(|metrics| metrics.cursor);
+            let mut jump = None;
+            SidePanel::right("outline")
+                .resizable(true)
+                .default_width(220.0)
+                .width_range(160.0..=380.0)
+                .show(ctx, |ui| {
+                    jump = self.panels.outline.show(ui, &self.document_content, cursor);
+                });
+            if let Some(jump) = jump {
+                self.pending_selection = Some((jump.char_offset, jump.char_offset));
+                self.scroll_to_char = Some(jump.char_offset);
+                self.focus_editor = true;
+                ctx.request_repaint();
+            }
+        }
+
         // Central panel: editor split or graph view depending on active panel.
         let mut graph_moved = false;
         let mut tab_action: Option<TabStripAction> = None;
@@ -2122,6 +2151,7 @@ impl eframe::App for EditorApp {
                     &mut self.restore_cursor,
                     &mut self.restore_scroll,
                     &mut self.pending_selection,
+                    &mut self.scroll_to_char,
                 ));
             }
         });
