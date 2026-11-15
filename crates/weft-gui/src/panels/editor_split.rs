@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use crate::panels::preview::PreviewPanel;
 use crate::theme::{palette, space};
-use crate::widgets::MarkdownEditor;
 use crate::widgets::chrome::{badge, empty_state, section_header};
+use crate::widgets::{EditorMetrics, MarkdownEditor};
 use egui::{RichText, Ui};
 
 #[derive(Debug)]
@@ -42,7 +42,10 @@ impl EditorSplitPanel {
         ctx: &egui::Context,
         split_ratio: &mut f32,
         font_size: f32,
-    ) {
+        breadcrumbs: &[String],
+        cursor: &mut Option<usize>,
+        scroll: &mut Option<f32>,
+    ) -> EditorMetrics {
         let palette = palette(ui.ctx());
         if open_document.is_none() {
             empty_state(
@@ -50,16 +53,22 @@ impl EditorSplitPanel {
                 "No document open",
                 "Pick a note in the sidebar or create one with Ctrl+N.",
             );
-            return;
+            return EditorMetrics::default();
         }
 
         ui.horizontal(|ui| {
-            let name = open_document
-                .as_ref()
-                .and_then(|path| path.file_name())
-                .and_then(|name| name.to_str())
-                .unwrap_or("Untitled");
-            ui.label(RichText::new(name).strong().size(15.0));
+            for (index, crumb) in breadcrumbs.iter().enumerate() {
+                let last = index + 1 == breadcrumbs.len();
+                if index > 0 {
+                    ui.label(RichText::new("/").size(12.0).color(palette.text_muted));
+                }
+                let text = RichText::new(crumb).size(if last { 15.0 } else { 12.0 });
+                if last {
+                    ui.label(text.strong());
+                } else {
+                    ui.label(text.color(palette.text_muted));
+                }
+            }
             if *dirty {
                 badge(ui, "Unsaved", palette.warning);
             }
@@ -96,8 +105,16 @@ impl EditorSplitPanel {
         self.split_ratio = *split_ratio;
 
         section_header(ui, "Source");
-        self.editor
-            .show(ui, open_document, document_content, dirty, ctx, font_size);
+        self.editor.show(
+            ui,
+            open_document,
+            document_content,
+            dirty,
+            ctx,
+            font_size,
+            cursor,
+            scroll,
+        )
     }
 
     /// Get the current split ratio.

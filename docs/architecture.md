@@ -44,6 +44,7 @@ dispatches them once per frame.
 | `workspace.rs` | Panes, tabs, and session restore: open/close/reorder/split/merge, rename and delete propagation, atomic save to `<vault>/.weft/workspace.toml`, and sanitizing of restored state. |
 | `file_ops.rs` | `FileOps` trait over a vault plus `write_atomic` (temp file, `fsync`, rename). |
 | `trash.rs` | Moves deleted files and directories to the platform trash, with `<vault>/.weft/trash/` as a fallback that preserves the original path. |
+| `nav.rs` | Per-pane back/forward stacks. Entries carry the caret and scroll; revisiting the current note updates it in place, renames rewrite entries, and deletes drop them. |
 | `history.rs` | File-recovery snapshots: records a note's previous contents on save into `<vault>/.weft/history/<note>/<ms>.md`, deduplicates unchanged content, and prunes to a per-note retention count. |
 | `plugins.rs` | Lifecycle-only plugin registry and dispatch. |
 | `export.rs` | Standalone HTML for one document (with escaped title) and a markdown bundle for a vault. |
@@ -109,14 +110,14 @@ weft-core/src/
   templates.rs    template expansion
 
 weft-gui/src/
-  nav.rs          per-pane back/forward history
   panels/outline.rs, panels/properties.rs
   panels/views/{table,cards,board,calendar,timeline}.rs
 ```
 
-The workspace model already landed in `weft-core/src/workspace.rs` (M4) rather
-than in the GUI: session restore is pure data, and keeping it in the core makes
-tab behaviour testable without egui.
+The workspace model and the navigation stacks already landed in `weft-core`
+(`workspace.rs`, `nav.rs`) rather than in the GUI: session restore and
+back/forward are pure data, and keeping them in the core makes the rules
+testable without egui.
 
 Rule: views are **data** (a filter/sort/group description in
 `.weft/views.toml`), evaluated by `weft-core`; the GUI only renders results.

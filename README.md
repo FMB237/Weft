@@ -23,7 +23,11 @@ a separate, GUI-independent core crate.
   context menu closes others or everything to the right.
 - **Editor:** syntax-highlighted Markdown editing with configurable font size,
   dirty-state indicator, and save-on-demand or timed auto-save. Editor and
-  graph share one window through tabs.
+  graph share one window through tabs. Each tab remembers its caret and scroll
+  position, and breadcrumbs in the header show `vault / folder / note.md`.
+- **Navigation:** per-pane back and forward on `Alt+Left`/`Alt+Right`, the
+  mouse back/forward buttons, or View > Back/Forward. Each step carries the
+  caret and scroll, so going back returns to where you were.
 - **Design:** dark-first indigo palette with neutral surfaces, a matching light
   theme, and true system-theme following. Bundled Inter and JetBrains Mono,
   shared cards/tabs/empty states, styled scrollbars and selection, and a
@@ -57,7 +61,8 @@ a separate, GUI-independent core crate.
   vault to a bundle.
 - **Shortcuts:** `Ctrl/Cmd+S` save, `Ctrl/Cmd+N` or `Ctrl/Cmd+T` new note,
   `Ctrl/Cmd+W` close tab, `Ctrl/Cmd+Tab` next tab,
-  `Ctrl/Cmd+Shift+T` reopen closed tab, `Ctrl/Cmd+O` open vault,
+  `Ctrl/Cmd+Shift+T` reopen closed tab, `Alt+Left`/`Alt+Right` back and
+  forward, `Ctrl/Cmd+O` open vault,
   `Ctrl/Cmd+F` search, `Ctrl/Cmd+P` command palette, `Ctrl/Cmd+G` graph,
   `Ctrl/Cmd+Shift+P` export note, `Ctrl/Cmd+Shift+B` export vault.
 

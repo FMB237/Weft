@@ -12,6 +12,9 @@ use weft_core::graph_updater::GraphUpdater;
 use weft_core::history::{DEFAULT_RETENTION, HistoryStore, Snapshot};
 use weft_core::index::SearchIndex;
 use weft_core::layout_store::LayoutStore;
+use weft_core::nav::{NavEntry, NavHistory};
+
+use crate::widgets::EditorMetrics;
 use weft_core::vault::Vault;
 use weft_core::watcher::{WatchEvent, WatchHandle};
 use weft_core::workspace::Workspace;
@@ -139,6 +142,14 @@ pub struct EditorApp {
     search_index: Option<SearchIndex>,
     /// Background filesystem watcher for the open vault.
     watcher: Option<WatchHandle>,
+    /// Per-pane back/forward stacks, indexed like `workspace.panes`.
+    nav: Vec<NavHistory>,
+    /// Caret to place when the active buffer is next rendered.
+    restore_cursor: Option<usize>,
+    /// Vertical scroll to apply when the active buffer is next rendered.
+    restore_scroll: Option<f32>,
+    /// Caret and scroll reported by the last editor frame.
+    editor_metrics: Option<EditorMetrics>,
     /// Save snapshots for the open vault.
     history: Option<HistoryStore>,
     /// Whether the file-recovery dialog is open.
@@ -206,6 +217,10 @@ impl EditorApp {
             last_window_title: String::new(),
             search_index: None,
             watcher: None,
+            nav: vec![NavHistory::new(), NavHistory::new()],
+            restore_cursor: None,
+            restore_scroll: None,
+            editor_metrics: None,
             history: None,
             recovery_open: false,
             recovery_snapshots: Vec::new(),
@@ -308,16 +323,33 @@ impl EditorApp {
     }
 
     /// Load the active tab's buffer into the editor fields.
+    ///
+    /// Use this for a user-visible move between notes: it records a navigation
+    /// step. Code that is already moving through history calls
+    /// [`Self::load_buffer`] instead, so back/forward does not push new steps.
     fn load_active_tab(&mut self) {
+        self.load_buffer();
+        self.record_nav_visit();
+    }
+
+    /// Load the active tab's buffer into the editor fields, without touching
+    /// the navigation stacks.
+    fn load_buffer(&mut self) {
         self.dirty = false;
         self.document_content.clear();
         self.open_document = None;
+        self.restore_cursor = None;
+        self.restore_scroll = None;
         self.last_auto_save = std::time::Instant::now();
 
         let Some(tab) = self.workspace.active_tab() else {
             return;
         };
         self.open_document = Some(tab.path.clone());
+        self.restore_cursor = tab.cursor;
+        if tab.scroll > 0.0 {
+            self.restore_scroll = Some(tab.scroll);
+        }
         if let Some(buffer) = &tab.unsaved {
             self.document_content = buffer.clone();
             self.dirty = true;
@@ -330,6 +362,61 @@ impl EditorApp {
                 self.external_change =
                     Some(format!("Could not read {}: {error}", tab.path.display()));
             }
+        }
+    }
+
+    /// Push the visible note onto the focused pane's history stack.
+    fn record_nav_visit(&mut self) {
+        let Some(path) = self.open_document.clone() else {
+            return;
+        };
+        let pane = self.workspace.focused;
+        if let Some(history) = self.nav.get_mut(pane) {
+            history.update_current(self.restore_cursor, 0);
+            history.visit(NavEntry::at(path, self.restore_cursor));
+        }
+    }
+
+    /// Step back or forward in the focused pane's history.
+    fn navigate(&mut self, forward: bool) {
+        let pane = self.workspace.focused;
+        let Some(history) = self.nav.get_mut(pane) else {
+            return;
+        };
+        let target = if forward {
+            history.forward()
+        } else {
+            history.back()
+        };
+        let Some(target) = target else {
+            return;
+        };
+        self.stash_active_tab();
+        self.workspace.focused = pane;
+        self.workspace.open(target.path.clone());
+        self.load_buffer();
+        if target.cursor.is_some() {
+            self.restore_cursor = target.cursor;
+        }
+        if target.scroll > 0 {
+            self.restore_scroll = Some(target.scroll as f32);
+        }
+        self.record_nav_position();
+    }
+
+    /// Store the caret and scroll of the visible note in its tab and its
+    /// history entry.
+    fn record_nav_position(&mut self) {
+        let Some(metrics) = self.editor_metrics else {
+            return;
+        };
+        if let Some(tab) = self.workspace.active_tab_mut() {
+            tab.cursor = metrics.cursor;
+            tab.scroll = metrics.scroll;
+        }
+        let pane = self.workspace.focused;
+        if let Some(history) = self.nav.get_mut(pane) {
+            history.update_current(metrics.cursor, metrics.scroll_points());
         }
     }
 
@@ -552,6 +639,13 @@ impl EditorApp {
                     // Keep the live buffer: a rename must not discard edits or
                     // re-read the file from disk.
                     self.workspace.rename_path(&from, &to);
+                    for history in &mut self.nav {
+                        history.rename(&from, &to);
+                        history.update_current(
+                            self.editor_metrics.and_then(|m| m.cursor),
+                            self.editor_metrics.map_or(0, |m| m.scroll_points()),
+                        );
+                    }
                     self.open_document = self.workspace.active_path().map(Path::to_path_buf);
                     self.rebuild_search_index();
                     self.panels.search.invalidate();
@@ -563,6 +657,10 @@ impl EditorApp {
                         .dirty
                         .then(|| (self.workspace.focused, self.workspace.focused_pane().active));
                     self.workspace.remove_path_keeping(&path, keep);
+                    for history in &mut self.nav {
+                        history.forget_under(&path);
+                        history.forget(&path);
+                    }
                     self.load_active_tab();
                     self.rebuild_search_index();
                     self.panels.search.invalidate();
@@ -674,6 +772,28 @@ impl EditorApp {
     pub(crate) fn handle_keyboard(&mut self, ctx: &egui::Context) {
         let input = ctx.input(std::clone::Clone::clone);
         let modifiers = input.modifiers;
+
+        if modifiers.alt && !modifiers.ctrl && !modifiers.command {
+            if input.key_pressed(Key::ArrowLeft) {
+                self.navigate(false);
+                ctx.request_repaint();
+            }
+            if input.key_pressed(Key::ArrowRight) {
+                self.navigate(true);
+                ctx.request_repaint();
+            }
+        }
+
+        // Mouse back/forward buttons.
+        if input.pointer.button_pressed(egui::PointerButton::Extra1) {
+            self.navigate(false);
+            ctx.request_repaint();
+        }
+        if input.pointer.button_pressed(egui::PointerButton::Extra2) {
+            self.navigate(true);
+            ctx.request_repaint();
+        }
+
         let command = modifiers.mac_cmd || modifiers.ctrl;
         if !command {
             return;
@@ -761,6 +881,25 @@ impl EditorApp {
         self.stash_active_tab();
         self.workspace.cycle(delta);
         self.load_active_tab();
+    }
+
+    /// `vault / folder / note.md` for the editor header.
+    fn breadcrumbs(&self) -> Vec<String> {
+        let Some(path) = &self.open_document else {
+            return Vec::new();
+        };
+        let mut crumbs = Vec::new();
+        if let Some(vault) = &self.vault
+            && let Some(name) = vault.root.file_name().and_then(|name| name.to_str())
+        {
+            crumbs.push(name.to_string());
+        }
+        for component in path.components() {
+            if let std::path::Component::Normal(part) = component {
+                crumbs.push(part.to_string_lossy().into_owned());
+            }
+        }
+        crumbs
     }
 
     /// Window title reflecting the open document and dirty state.
@@ -1353,6 +1492,24 @@ impl eframe::App for EditorApp {
                 });
                 ui.menu_button("View", |ui| {
                     use crate::theme::ThemeMode;
+                    let pane = self.workspace.focused;
+                    let can_back = self.nav.get(pane).is_some_and(NavHistory::can_go_back);
+                    let can_forward = self.nav.get(pane).is_some_and(NavHistory::can_go_forward);
+                    if ui
+                        .add_enabled(can_back, egui::Button::new("Back\tAlt+Left"))
+                        .clicked()
+                    {
+                        self.navigate(false);
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add_enabled(can_forward, egui::Button::new("Forward\tAlt+Right"))
+                        .clicked()
+                    {
+                        self.navigate(true);
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui
                         .selectable_label(self.search_open, "Search\tCtrl+F")
                         .clicked()
@@ -1528,6 +1685,12 @@ impl eframe::App for EditorApp {
         // Central panel: editor split or graph view depending on active panel.
         let mut graph_moved = false;
         let mut tab_action: Option<TabStripAction> = None;
+        let mut editor_metrics: Option<EditorMetrics> = None;
+        let breadcrumbs = self.breadcrumbs();
+        // The editor is about to render this document. If a tab action moves
+        // the workspace during the same frame, the metrics belong to the old
+        // note and must not be written to the new tab.
+        let rendered_document = self.open_document.clone();
         CentralPanel::default().show(ctx, |ui| {
             if self.panels.active == PanelId::Graph {
                 graph_moved = self.panels.graph.show(
@@ -1540,7 +1703,7 @@ impl eframe::App for EditorApp {
             } else {
                 tab_action = document_tabs(ui, self.workspace.focused_pane(), self.dirty);
                 ui.separator();
-                self.panels.editor_split.show(
+                editor_metrics = Some(self.panels.editor_split.show(
                     ui,
                     &self.open_document,
                     &mut self.document_content,
@@ -1548,11 +1711,20 @@ impl eframe::App for EditorApp {
                     ctx,
                     &mut self.editor_split_ratio,
                     self.settings.font_size,
-                );
+                    &breadcrumbs,
+                    &mut self.restore_cursor,
+                    &mut self.restore_scroll,
+                ));
             }
         });
         if let Some(action) = tab_action {
             self.apply_tab_action(action);
+        }
+        if let Some(metrics) = editor_metrics
+            && self.open_document == rendered_document
+        {
+            self.editor_metrics = Some(metrics);
+            self.record_nav_position();
         }
         if graph_moved {
             self.save_layout();

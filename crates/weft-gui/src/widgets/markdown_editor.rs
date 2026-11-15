@@ -4,9 +4,30 @@
 //! highlighting applied through `TextEdit::layouter`.
 
 use crate::widgets::syntax_highlight::SyntaxHighlighter;
-use egui::text::LayoutJob;
+use egui::text::{CCursor, CCursorRange, LayoutJob};
 use egui::{FontId, Id, TextEdit, TextFormat, Ui};
 use std::path::PathBuf;
+
+/// Where the caret and scroll ended up after a frame.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct EditorMetrics {
+    /// Character offset of the caret.
+    pub cursor: Option<usize>,
+    /// Vertical scroll offset of the editor, in points.
+    pub scroll: f32,
+}
+
+impl EditorMetrics {
+    /// Scroll as the whole-point value stored in a tab or nav entry.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamped to a small non-negative range before the cast"
+    )]
+    pub fn scroll_points(&self) -> u32 {
+        self.scroll.clamp(0.0, 1_000_000.0).round() as u32
+    }
+}
 
 #[derive(Debug)]
 pub struct MarkdownEditor {
@@ -24,6 +45,14 @@ impl MarkdownEditor {
     }
 
     /// Render the editor for the currently open document.
+    ///
+    /// `cursor` and `scroll` are one-shot restore hints: when set, they place
+    /// the caret or scroll position for this frame and are cleared, so a tab
+    /// switch or a back/forward jump lands where the user left off.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the editor takes the shared document state explicitly"
+    )]
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -32,13 +61,16 @@ impl MarkdownEditor {
         dirty: &mut bool,
         _ctx: &egui::Context,
         font_size: f32,
-    ) {
+        cursor: &mut Option<usize>,
+        scroll: &mut Option<f32>,
+    ) -> EditorMetrics {
         let Some(path) = open_document else {
             ui.label("No document open.");
             ui.separator();
             ui.label("Select a file from the sidebar to start editing.");
-            return;
+            return EditorMetrics::default();
         };
+        let text_id = self.id.with(path);
 
         let base_format = TextFormat {
             font_id: FontId::proportional(font_size),
@@ -68,20 +100,46 @@ impl MarkdownEditor {
             ui.fonts(|fonts| fonts.layout_job(job))
         };
 
-        let response = TextEdit::multiline(document_content)
-            .id(self.id.with(path))
-            .font(FontId::proportional(font_size))
-            .desired_width(f32::INFINITY)
-            .desired_rows(20)
-            .layouter(&mut layouter)
-            .show(ui);
+        if let Some(index) = cursor.take() {
+            let mut state = TextEdit::load_state(ui.ctx(), text_id).unwrap_or_default();
+            let range = CCursorRange::one(CCursor::new(index));
+            state.cursor.set_char_range(Some(range));
+            state.store(ui.ctx(), text_id);
+        }
 
-        if response.response.changed() {
+        let mut area = egui::ScrollArea::vertical()
+            .id_salt(text_id.with("scroll"))
+            .auto_shrink([false; 2]);
+        if let Some(offset) = scroll.take() {
+            area = area.vertical_scroll_offset(offset.max(0.0));
+        }
+
+        let output = area.show(ui, |ui| {
+            TextEdit::multiline(document_content)
+                .id(text_id)
+                .font(FontId::proportional(font_size))
+                .desired_width(f32::INFINITY)
+                .desired_rows(1)
+                .layouter(&mut layouter)
+                .show(ui)
+        });
+
+        if output.inner.response.changed() {
             *dirty = true;
         }
 
         if *dirty {
             ui.colored_label(egui::Color32::from_rgb(220, 140, 50), "unsaved changes");
+        }
+
+        EditorMetrics {
+            cursor: output
+                .inner
+                .state
+                .cursor
+                .char_range()
+                .map(|range| range.primary.index),
+            scroll: output.state.offset.y,
         }
     }
 

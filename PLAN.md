@@ -111,11 +111,13 @@ structure on top of plain notes*. That is the gap Weft closes in M5.
 
 **Fundamentals**
 
-- No tabs, split panes, back/forward navigation, or per-note cursor restore.
-- No outline panel, breadcrumbs, quick switcher, or find & replace.
+- Tabs, session restore, back/forward, per-note cursor/scroll restore, and
+  breadcrumbs landed in M4. Split *panes* are modelled but not yet rendered.
+- No outline panel, quick switcher, or find & replace.
 - No `[[` or `#tag` autocomplete.
 - Wikilinks are not clickable in preview; they render as literal text.
-- Delete is permanent: no trash, no snapshots, no atomic-write guarantee.
+- Trash, recovery snapshots, and atomic writes landed in M4. Crash recovery of
+  an unsaved buffer is still missing.
 - No image paste/display, attachments, or drag-and-drop file moves.
 - No properties panel, aliases, `[[note#heading]]`, or note embeds.
 
@@ -172,7 +174,6 @@ weft-core/src/
   templates.rs    template expansion ({{date}}, {{title}}, {{cursor}})
 
 weft-gui/src/
-  nav.rs          per-pane back/forward history
   panels/outline.rs
   panels/properties.rs
   panels/views/{table,cards,board,calendar,timeline}.rs
@@ -238,9 +239,12 @@ recoverable before anything can bulk-edit the vault.
 - [x] Session restore writes the whole workspace (panes, tabs, order, active,
       split ratio) to `.weft/workspace.toml` instead of one `open_document`;
       writes are atomic and unsafe paths are rejected on load.
-- [ ] `nav.rs`: per-pane back/forward stack (`Alt+Left/Right`, mouse buttons),
-      entries carry cursor and scroll, not just a path.
-- [ ] Breadcrumbs in the editor header: `vault / folder / note.md`.
+- [x] `nav.rs` (in `weft-core`): per-pane back/forward stack on
+      `Alt+Left/Right`, the mouse back/forward buttons, and View >
+      Back/Forward. Entries carry the caret and scroll, so stepping back lands
+      where the user left. Renames rewrite entries; deletes drop them.
+- [x] Breadcrumbs in the editor header: `vault / folder / note.md`.
+- [x] Per-tab caret and scroll restore, saved in `.weft/workspace.toml`.
 
 **Find and open**
 
