@@ -49,6 +49,9 @@ a separate, GUI-independent core crate.
   placeholders; clicking one creates and opens the note.
 - **Backlinks:** a panel listing notes that link to the open document;
   clicking one opens it.
+- **Quick switch:** `Ctrl+O` opens a fuzzy note list (open tabs first, then the
+  whole vault). Type a few characters of the name or path, arrow through the
+  matches, and press Enter.
 - **Search:** full-text vault search (tantivy) with snippets and arrow-key /
   Enter navigation. Frontmatter tags are indexed; `#tag` narrows a search, and
   a tag on its own lists every note carrying it.
@@ -62,7 +65,7 @@ a separate, GUI-independent core crate.
 - **Shortcuts:** `Ctrl/Cmd+S` save, `Ctrl/Cmd+N` or `Ctrl/Cmd+T` new note,
   `Ctrl/Cmd+W` close tab, `Ctrl/Cmd+Tab` next tab,
   `Ctrl/Cmd+Shift+T` reopen closed tab, `Alt+Left`/`Alt+Right` back and
-  forward, `Ctrl/Cmd+O` open vault,
+  forward, `Ctrl/Cmd+O` quick switch, `Ctrl/Cmd+Shift+O` open vault,
   `Ctrl/Cmd+F` search, `Ctrl/Cmd+P` command palette, `Ctrl/Cmd+G` graph,
   `Ctrl/Cmd+Shift+P` export note, `Ctrl/Cmd+Shift+B` export vault.
 

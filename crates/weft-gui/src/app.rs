@@ -7,6 +7,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use weft_core::export::{export_document, export_vault_bundle};
+use weft_core::fuzzy::{self, Ranked};
 use weft_core::graph::LinkGraph;
 use weft_core::graph_updater::GraphUpdater;
 use weft_core::history::{DEFAULT_RETENTION, HistoryStore, Snapshot};
@@ -130,6 +131,16 @@ pub struct EditorApp {
     pub(crate) vault_open_path: String,
     /// Split ratio between editor and preview (0.0 = all editor, 1.0 = all preview).
     pub(crate) editor_split_ratio: f32,
+    /// Whether the quick switcher is open.
+    quick_open: bool,
+    /// Quick switcher query.
+    quick_input: String,
+    /// Notes to search, open tabs first.
+    quick_pool: Vec<PathBuf>,
+    /// Ranked match for the current query.
+    quick_results: Vec<Ranked>,
+    /// Highlighted result.
+    quick_selected: usize,
     /// Whether the command palette is open.
     pub(crate) command_palette_open: bool,
     /// Command palette input.
@@ -211,6 +222,11 @@ impl EditorApp {
             vault_open_dialog_open: false,
             vault_open_path: String::new(),
             editor_split_ratio: initial_ratio,
+            quick_open: false,
+            quick_input: String::new(),
+            quick_pool: Vec::new(),
+            quick_results: Vec::new(),
+            quick_selected: 0,
             command_palette_open: false,
             command_palette_input: String::new(),
             pending_action: None,
@@ -800,6 +816,10 @@ impl EditorApp {
         }
 
         if modifiers.shift {
+            if input.key_pressed(Key::O) {
+                self.vault_open_dialog_open = true;
+                ctx.request_repaint();
+            }
             if input.key_pressed(Key::P) {
                 if let Some(doc) = &self.open_document {
                     self.export_state = Some(ExportState::Document {
@@ -833,7 +853,7 @@ impl EditorApp {
             ctx.request_repaint();
         }
         if input.key_pressed(Key::O) {
-            self.vault_open_dialog_open = true;
+            self.open_quick_switcher();
             ctx.request_repaint();
         }
         if input.key_pressed(Key::N) {
@@ -1340,6 +1360,151 @@ impl EditorApp {
     }
 
     /// Render the command palette modal if open.
+    /// Open the quick switcher and snapshot the candidate notes.
+    ///
+    /// Open tabs come first so an empty query lists what the user is already
+    /// working on; the rest of the vault follows.
+    fn open_quick_switcher(&mut self) {
+        let Some(vault) = &self.vault else {
+            self.external_change = Some("Open a vault first.".to_string());
+            return;
+        };
+        let mut pool: Vec<PathBuf> = self
+            .workspace
+            .panes
+            .iter()
+            .flat_map(|pane| pane.tabs.iter().map(|tab| tab.path.clone()))
+            .collect();
+        if let Ok(files) = vault.list_files() {
+            for path in files {
+                if !pool.contains(&path) {
+                    pool.push(path);
+                }
+            }
+        }
+        self.quick_pool = pool;
+        self.quick_input.clear();
+        self.quick_selected = 0;
+        self.quick_open = true;
+        self.refresh_quick_results();
+    }
+
+    /// Recompute the ranked results for the current query.
+    fn refresh_quick_results(&mut self) {
+        const LIMIT: usize = 60;
+        if self.quick_input.trim().is_empty() {
+            self.quick_results = self
+                .quick_pool
+                .iter()
+                .take(LIMIT)
+                .map(|path| Ranked {
+                    path: path.clone(),
+                    score: 0,
+                })
+                .collect();
+        } else {
+            self.quick_results = fuzzy::rank(
+                self.quick_input.trim(),
+                self.quick_pool.iter().map(PathBuf::as_path),
+                LIMIT,
+            );
+        }
+        self.quick_selected = self
+            .quick_selected
+            .min(self.quick_results.len().saturating_sub(1));
+    }
+
+    /// Render the quick switcher overlay.
+    fn render_quick_switcher(&mut self, ctx: &egui::Context) {
+        if !self.quick_open {
+            return;
+        }
+
+        let mut close = false;
+        let mut open: Option<PathBuf> = None;
+        let width = (ctx.screen_rect().width() - 80.0).clamp(320.0, 640.0);
+        let center = ctx.available_rect().center();
+        let rect = egui::Rect::from_center_size(center, egui::vec2(width, 420.0));
+
+        egui::Window::new("Quick switch")
+            .collapsible(false)
+            .resizable(true)
+            .title_bar(false)
+            .current_pos(rect.min)
+            .default_width(width)
+            .max_height(460.0)
+            .show(ctx, |ui| {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.quick_input)
+                        .hint_text("Jump to a note...")
+                        .desired_width(f32::INFINITY),
+                );
+                if response.changed() {
+                    self.quick_selected = 0;
+                    self.refresh_quick_results();
+                }
+                if !response.has_focus() {
+                    response.request_focus();
+                }
+
+                let input = ui.ctx().input(|i| {
+                    (
+                        i.key_pressed(Key::ArrowDown),
+                        i.key_pressed(Key::ArrowUp),
+                        i.key_pressed(Key::Enter),
+                        i.key_pressed(Key::Escape),
+                    )
+                });
+                let (down, up, enter, escape) = input;
+                if down && !self.quick_results.is_empty() {
+                    self.quick_selected = (self.quick_selected + 1) % self.quick_results.len();
+                }
+                if up && !self.quick_results.is_empty() {
+                    self.quick_selected = self
+                        .quick_selected
+                        .checked_sub(1)
+                        .unwrap_or(self.quick_results.len() - 1);
+                }
+                if escape {
+                    close = true;
+                }
+                if enter {
+                    open = self
+                        .quick_results
+                        .get(self.quick_selected)
+                        .map(|r| r.path.clone());
+                }
+
+                ui.separator();
+                if self.quick_results.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No note matches.").color(palette(ui.ctx()).text_muted),
+                    );
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt("quick_results")
+                    .max_height(360.0)
+                    .show(ui, |ui| {
+                        for index in 0..self.quick_results.len() {
+                            let path = &self.quick_results[index].path;
+                            let label = path.display().to_string();
+                            let selected = index == self.quick_selected;
+                            if ui.selectable_label(selected, label).clicked() {
+                                open = Some(path.clone());
+                            }
+                        }
+                    });
+            });
+
+        if let Some(path) = open {
+            close = true;
+            self.request_open_document(&path);
+        }
+        if close {
+            self.quick_open = false;
+        }
+    }
+
     fn render_command_palette(&mut self, ctx: &egui::Context) {
         let width = 500.0;
         let height = 300.0;
@@ -1359,7 +1524,8 @@ impl EditorApp {
 
                 ui.label("Commands:");
                 ui.label("  Ctrl+S - Save document");
-                ui.label("  Ctrl+O - Open vault");
+                ui.label("  Ctrl+O - Quick switch");
+                ui.label("  Ctrl+Shift+O - Open vault");
                 ui.label("  Ctrl+N - New note");
                 ui.label("  Ctrl+F - Search notes");
                 ui.label("  Ctrl+P - Command palette");
@@ -1434,7 +1600,11 @@ impl eframe::App for EditorApp {
                         self.new_note();
                         ui.close_menu();
                     }
-                    if ui.button("Open Vault...").clicked() {
+                    if ui.button("Quick Switch...\tCtrl+O").clicked() {
+                        self.open_quick_switcher();
+                        ui.close_menu();
+                    }
+                    if ui.button("Open Vault...\tCtrl+Shift+O").clicked() {
                         self.vault_open_dialog_open = true;
                         ui.close_menu();
                     }
@@ -1745,6 +1915,9 @@ impl eframe::App for EditorApp {
         if self.vault_open_dialog_open {
             self.render_vault_open_dialog(ctx);
         }
+
+        // Render the quick switcher if open.
+        self.render_quick_switcher(ctx);
 
         // Render the command palette if open.
         if self.command_palette_open {
