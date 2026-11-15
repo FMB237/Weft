@@ -31,15 +31,17 @@ impl EditorMetrics {
 
 #[derive(Debug)]
 pub struct MarkdownEditor {
-    /// Stable egui id for the text edit widget, so state persists across frames.
-    id: Id,
     highlighter: SyntaxHighlighter,
 }
 
 impl MarkdownEditor {
+    /// Stable id of the text edit for `path`, so callers can move focus to it.
+    pub fn text_id(path: &std::path::Path) -> Id {
+        Id::new("markdown_editor").with(path)
+    }
+
     pub fn new() -> Self {
         Self {
-            id: Id::new("markdown_editor"),
             highlighter: SyntaxHighlighter::new(),
         }
     }
@@ -63,6 +65,7 @@ impl MarkdownEditor {
         font_size: f32,
         cursor: &mut Option<usize>,
         scroll: &mut Option<f32>,
+        selection: &mut Option<(usize, usize)>,
     ) -> EditorMetrics {
         let Some(path) = open_document else {
             ui.label("No document open.");
@@ -70,7 +73,7 @@ impl MarkdownEditor {
             ui.label("Select a file from the sidebar to start editing.");
             return EditorMetrics::default();
         };
-        let text_id = self.id.with(path);
+        let text_id = Self::text_id(path);
 
         let base_format = TextFormat {
             font_id: FontId::proportional(font_size),
@@ -103,6 +106,12 @@ impl MarkdownEditor {
         if let Some(index) = cursor.take() {
             let mut state = TextEdit::load_state(ui.ctx(), text_id).unwrap_or_default();
             let range = CCursorRange::one(CCursor::new(index));
+            state.cursor.set_char_range(Some(range));
+            state.store(ui.ctx(), text_id);
+        }
+        if let Some((start, end)) = selection.take() {
+            let mut state = TextEdit::load_state(ui.ctx(), text_id).unwrap_or_default();
+            let range = CCursorRange::two(CCursor::new(start), CCursor::new(end));
             state.cursor.set_char_range(Some(range));
             state.store(ui.ctx(), text_id);
         }

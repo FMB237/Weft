@@ -44,6 +44,7 @@ dispatches them once per frame.
 | `workspace.rs` | Panes, tabs, and session restore: open/close/reorder/split/merge, rename and delete propagation, atomic save to `<vault>/.weft/workspace.toml`, and sanitizing of restored state. |
 | `file_ops.rs` | `FileOps` trait over a vault plus `write_atomic` (temp file, `fsync`, rename). |
 | `trash.rs` | Moves deleted files and directories to the platform trash, with `<vault>/.weft/trash/` as a fallback that preserves the original path. |
+| `find.rs` | In-note find and replace: byte-accurate matches, case-insensitive by default via a lowered-text map (so offsets survive case folds that change length), replace-all, and wrap-around stepping. |
 | `fuzzy.rs` | Quick-switcher scoring: case-insensitive subsequence match that rewards word boundaries, consecutive characters, and early matches; `rank` sorts stably by score then path. |
 | `nav.rs` | Per-pane back/forward stacks. Entries carry the caret and scroll; revisiting the current note updates it in place, renames rewrite entries, and deletes drop them. |
 | `history.rs` | File-recovery snapshots: records a note's previous contents on save into `<vault>/.weft/history/<note>/<ms>.md`, deduplicates unchanged content, and prunes to a per-note retention count. |

@@ -7,6 +7,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use weft_core::export::{export_document, export_vault_bundle};
+use weft_core::find::{self, Match as FindMatch};
 use weft_core::fuzzy::{self, Ranked};
 use weft_core::graph::LinkGraph;
 use weft_core::graph_updater::GraphUpdater;
@@ -131,6 +132,25 @@ pub struct EditorApp {
     pub(crate) vault_open_path: String,
     /// Split ratio between editor and preview (0.0 = all editor, 1.0 = all preview).
     pub(crate) editor_split_ratio: f32,
+    /// Whether the in-note find bar is open.
+    find_open: bool,
+    /// Find query.
+    find_query: String,
+    /// Replacement text.
+    find_replacement: String,
+    /// Whether the find bar matches case exactly.
+    find_match_case: bool,
+    /// Current matches for the query.
+    find_hits: Vec<FindMatch>,
+    /// Index into `find_hits` of the highlighted match.
+    find_index: usize,
+    /// Whether the query field should take focus this frame.
+    find_focus: bool,
+    /// Text range (character indices) to select in the editor.
+    pending_selection: Option<(usize, usize)>,
+    /// Whether the editor should take keyboard focus this frame, so the
+    /// selected match is visibly highlighted.
+    focus_editor: bool,
     /// Whether the quick switcher is open.
     quick_open: bool,
     /// Quick switcher query.
@@ -222,6 +242,15 @@ impl EditorApp {
             vault_open_dialog_open: false,
             vault_open_path: String::new(),
             editor_split_ratio: initial_ratio,
+            find_open: false,
+            find_query: String::new(),
+            find_replacement: String::new(),
+            find_match_case: false,
+            find_hits: Vec::new(),
+            find_index: 0,
+            find_focus: false,
+            pending_selection: None,
+            focus_editor: false,
             quick_open: false,
             quick_input: String::new(),
             quick_pool: Vec::new(),
@@ -788,25 +817,11 @@ impl EditorApp {
     pub(crate) fn handle_keyboard(&mut self, ctx: &egui::Context) {
         let input = ctx.input(std::clone::Clone::clone);
         let modifiers = input.modifiers;
+        self.handle_history_input(&input, ctx);
 
-        if modifiers.alt && !modifiers.ctrl && !modifiers.command {
-            if input.key_pressed(Key::ArrowLeft) {
-                self.navigate(false);
-                ctx.request_repaint();
-            }
-            if input.key_pressed(Key::ArrowRight) {
-                self.navigate(true);
-                ctx.request_repaint();
-            }
-        }
-
-        // Mouse back/forward buttons.
-        if input.pointer.button_pressed(egui::PointerButton::Extra1) {
-            self.navigate(false);
-            ctx.request_repaint();
-        }
-        if input.pointer.button_pressed(egui::PointerButton::Extra2) {
-            self.navigate(true);
+        if input.key_pressed(Key::Escape) && self.find_open {
+            self.find_open = false;
+            self.pending_selection = None;
             ctx.request_repaint();
         }
 
@@ -816,6 +831,13 @@ impl EditorApp {
         }
 
         if modifiers.shift {
+            if input.key_pressed(Key::F) {
+                self.search_open = !self.search_open;
+                if self.search_open {
+                    self.panels.search.focus();
+                }
+                ctx.request_repaint();
+            }
             if input.key_pressed(Key::O) {
                 self.vault_open_dialog_open = true;
                 ctx.request_repaint();
@@ -861,10 +883,7 @@ impl EditorApp {
             ctx.request_repaint();
         }
         if input.key_pressed(Key::F) {
-            self.search_open = !self.search_open;
-            if self.search_open {
-                self.panels.search.focus();
-            }
+            self.open_find_bar();
             ctx.request_repaint();
         }
         if input.key_pressed(Key::P) {
@@ -889,6 +908,29 @@ impl EditorApp {
         }
         if input.key_pressed(Key::Tab) {
             self.cycle_tab(1);
+            ctx.request_repaint();
+        }
+    }
+
+    /// Back/forward on Alt+arrows and the mouse back/forward buttons.
+    fn handle_history_input(&mut self, input: &egui::InputState, ctx: &egui::Context) {
+        let modifiers = input.modifiers;
+        if modifiers.alt && !modifiers.ctrl && !modifiers.command {
+            if input.key_pressed(Key::ArrowLeft) {
+                self.navigate(false);
+                ctx.request_repaint();
+            }
+            if input.key_pressed(Key::ArrowRight) {
+                self.navigate(true);
+                ctx.request_repaint();
+            }
+        }
+        if input.pointer.button_pressed(egui::PointerButton::Extra1) {
+            self.navigate(false);
+            ctx.request_repaint();
+        }
+        if input.pointer.button_pressed(egui::PointerButton::Extra2) {
+            self.navigate(true);
             ctx.request_repaint();
         }
     }
@@ -1360,6 +1402,195 @@ impl EditorApp {
     }
 
     /// Render the command palette modal if open.
+    /// Show the in-note find bar, seeding it from any open selection.
+    fn open_find_bar(&mut self) {
+        self.find_open = true;
+        self.find_focus = true;
+        self.refresh_find_hits();
+        if !self.find_hits.is_empty() {
+            self.select_find_hit();
+        }
+    }
+
+    /// Recompute matches for the current query.
+    fn refresh_find_hits(&mut self) {
+        self.find_hits = find::find_all(
+            &self.document_content,
+            &self.find_query,
+            self.find_match_case,
+        );
+        if self.find_index >= self.find_hits.len() {
+            self.find_index = 0;
+        }
+    }
+
+    /// Ask the editor to select the highlighted match.
+    fn select_find_hit(&mut self) {
+        let Some(hit) = self.find_hits.get(self.find_index).copied() else {
+            self.pending_selection = None;
+            return;
+        };
+        self.pending_selection = Some((
+            char_index(&self.document_content, hit.start),
+            char_index(&self.document_content, hit.end),
+        ));
+    }
+
+    /// Move the highlight to the next or previous match, wrapping around.
+    fn step_find(&mut self, forward: bool) {
+        self.refresh_find_hits();
+        if self.find_hits.is_empty() {
+            self.pending_selection = None;
+            return;
+        }
+        let len = self.find_hits.len();
+        self.find_index = if forward {
+            (self.find_index + 1) % len
+        } else {
+            (self.find_index + len - 1) % len
+        };
+        self.select_find_hit();
+    }
+
+    /// Replace the highlighted match and highlight the following one.
+    fn replace_current_hit(&mut self) {
+        self.refresh_find_hits();
+        let Some(hit) = self.find_hits.get(self.find_index).copied() else {
+            return;
+        };
+        let replacement = self.find_replacement.clone();
+        self.document_content
+            .replace_range(hit.start..hit.end, &replacement);
+        self.dirty = true;
+        self.refresh_find_hits();
+        if self.find_hits.is_empty() {
+            self.pending_selection = None;
+        } else {
+            self.find_index = self.find_index.min(self.find_hits.len() - 1);
+            self.select_find_hit();
+        }
+    }
+
+    /// Replace every match in the open note.
+    fn replace_all_hits(&mut self) {
+        let (text, count) = find::replace_all(
+            &self.document_content,
+            &self.find_query,
+            &self.find_replacement,
+            self.find_match_case,
+        );
+        if count == 0 {
+            return;
+        }
+        self.document_content = text;
+        self.dirty = true;
+        self.refresh_find_hits();
+        self.pending_selection = None;
+        self.external_change = Some(format!("Replaced {count} occurrence(s)."));
+    }
+
+    /// Render the find and replace bar above the editor.
+    fn render_find_bar(&mut self, ui: &mut egui::Ui) {
+        if !self.find_open {
+            return;
+        }
+        let palette = palette(ui.ctx());
+        let action = self.find_bar_controls(ui, &palette);
+
+        let status = if self.find_query.is_empty() {
+            "Type to search this note".to_string()
+        } else if self.find_hits.is_empty() {
+            "No matches".to_string()
+        } else {
+            format!("{} of {}", self.find_index + 1, self.find_hits.len())
+        };
+        ui.label(
+            egui::RichText::new(status)
+                .size(12.0)
+                .color(palette.text_muted),
+        );
+        ui.separator();
+
+        if action.changed {
+            self.find_index = 0;
+            self.refresh_find_hits();
+            self.select_find_hit();
+        }
+        if action.next {
+            self.step_find(true);
+            self.focus_editor = true;
+        }
+        if action.previous {
+            self.step_find(false);
+            self.focus_editor = true;
+        }
+        if action.replace {
+            self.replace_current_hit();
+            self.focus_editor = true;
+        }
+        if action.replace_all {
+            self.replace_all_hits();
+        }
+        if action.close {
+            self.find_open = false;
+            self.pending_selection = None;
+            self.focus_editor = true;
+        }
+    }
+
+    /// The find bar's inputs and buttons.
+    fn find_bar_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        palette: &crate::theme::Palette,
+    ) -> FindBarAction {
+        let mut action = FindBarAction::default();
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Find")
+                    .size(12.0)
+                    .color(palette.text_muted),
+            );
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.find_query)
+                    .hint_text("Find in note")
+                    .desired_width(180.0),
+            );
+            if self.find_focus {
+                response.request_focus();
+                self.find_focus = false;
+            }
+            if response.changed() {
+                action.changed = true;
+            }
+            if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                action.next = true;
+            }
+
+            ui.label(
+                egui::RichText::new("Replace")
+                    .size(12.0)
+                    .color(palette.text_muted),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.find_replacement)
+                    .hint_text("Replacement")
+                    .desired_width(180.0),
+            );
+
+            action.changed |= ui
+                .selectable_label(self.find_match_case, "Aa")
+                .on_hover_text("Match case")
+                .clicked();
+            action.previous = ui.button("Previous").clicked();
+            action.next |= ui.button("Next").clicked();
+            action.replace = ui.button("Replace").clicked();
+            action.replace_all = ui.button("Replace all").clicked();
+            action.close = ui.button("×").on_hover_text("Close (Esc)").clicked();
+        });
+        action
+    }
+
     /// Open the quick switcher and snapshot the candidate notes.
     ///
     /// Open tabs come first so an empty query lists what the user is already
@@ -1527,7 +1758,8 @@ impl EditorApp {
                 ui.label("  Ctrl+O - Quick switch");
                 ui.label("  Ctrl+Shift+O - Open vault");
                 ui.label("  Ctrl+N - New note");
-                ui.label("  Ctrl+F - Search notes");
+                ui.label("  Ctrl+F - Find in note");
+                ui.label("  Ctrl+Shift+F - Search vault");
                 ui.label("  Ctrl+P - Command palette");
                 ui.label("  Ctrl+G - Toggle graph");
                 ui.label("  Ctrl+W - Close note");
@@ -1680,8 +1912,12 @@ impl eframe::App for EditorApp {
                         ui.close_menu();
                     }
                     ui.separator();
+                    if ui.button("Find in Note\tCtrl+F").clicked() {
+                        self.open_find_bar();
+                        ui.close_menu();
+                    }
                     if ui
-                        .selectable_label(self.search_open, "Search\tCtrl+F")
+                        .selectable_label(self.search_open, "Search Vault\tCtrl+Shift+F")
                         .clicked()
                     {
                         self.search_open = !self.search_open;
@@ -1872,6 +2108,7 @@ impl eframe::App for EditorApp {
                 );
             } else {
                 tab_action = document_tabs(ui, self.workspace.focused_pane(), self.dirty);
+                self.render_find_bar(ui);
                 ui.separator();
                 editor_metrics = Some(self.panels.editor_split.show(
                     ui,
@@ -1884,6 +2121,7 @@ impl eframe::App for EditorApp {
                     &breadcrumbs,
                     &mut self.restore_cursor,
                     &mut self.restore_scroll,
+                    &mut self.pending_selection,
                 ));
             }
         });
@@ -1895,6 +2133,13 @@ impl eframe::App for EditorApp {
         {
             self.editor_metrics = Some(metrics);
             self.record_nav_position();
+        }
+        if self.focus_editor
+            && let Some(path) = &self.open_document
+        {
+            let id = crate::widgets::MarkdownEditor::text_id(path);
+            ctx.memory_mut(|memory| memory.request_focus(id));
+            self.focus_editor = false;
         }
         if graph_moved {
             self.save_layout();
@@ -1973,6 +2218,24 @@ pub enum ExportState {
     Vault { output: String },
 }
 
+/// Buttons the user pressed in the find bar.
+///
+/// One flag per control: each is independent, so an enum per button would
+/// only add conversion noise.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag mirrors one independent control in the bar"
+)]
+#[derive(Debug, Default, Clone, Copy)]
+struct FindBarAction {
+    changed: bool,
+    close: bool,
+    next: bool,
+    previous: bool,
+    replace: bool,
+    replace_all: bool,
+}
+
 /// Action waiting on unsaved-changes confirmation.
 #[derive(Debug, Clone, Copy)]
 enum PendingAction {
@@ -2029,6 +2292,12 @@ fn unique_child_path(vault: &Vault, dir: &Path, stem: &str, ext: &str) -> PathBu
         }
     }
     unreachable!("the loop always returns before exhausting usize")
+}
+
+/// Character index of a byte offset, clamped to the string length.
+fn char_index(text: &str, byte: usize) -> usize {
+    let byte = byte.min(text.len());
+    text[..byte].chars().count()
 }
 
 #[cfg(test)]

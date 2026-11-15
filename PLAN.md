@@ -113,7 +113,7 @@ structure on top of plain notes*. That is the gap Weft closes in M5.
 
 - Tabs, session restore, back/forward, per-note cursor/scroll restore, and
   breadcrumbs landed in M4. Split *panes* are modelled but not yet rendered.
-- The quick switcher landed in M4; the outline panel and find & replace have
+- The quick switcher and find & replace landed in M4; the outline panel has
   not.
 - No `[[` or `#tag` autocomplete.
 - Wikilinks are not clickable in preview; they render as literal text.
@@ -257,8 +257,10 @@ recoverable before anything can bulk-edit the vault.
       move. Aliases and creating a note on no match are still pending.
 - [ ] Command palette v2: fuzzy, grouped, recent-first, shortcut hints,
       context-filtered (note / graph / view).
-- [ ] `Ctrl+F` becomes in-note find & replace; vault search moves to
-      `Ctrl+Shift+F`.
+- [x] `Ctrl+F` is in-note find & replace; vault search moved to
+      `Ctrl+Shift+F`. Next/Previous wrap, `Enter` steps to the next match and
+      hands focus to the editor, Replace and Replace all edit the buffer (not
+      the file), and the count reads `n of m`.
 - [ ] Recent and pinned notes in the sidebar.
 
 **Editor fundamentals**

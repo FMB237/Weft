@@ -52,6 +52,9 @@ a separate, GUI-independent core crate.
 - **Quick switch:** `Ctrl+O` opens a fuzzy note list (open tabs first, then the
   whole vault). Type a few characters of the name or path, arrow through the
   matches, and press Enter.
+- **Find and replace:** `Ctrl+F` opens a find bar over the editor with match
+  count, case toggle, Previous/Next (wrapping), Replace, and Replace all. Vault
+  search moved to `Ctrl+Shift+F`.
 - **Search:** full-text vault search (tantivy) with snippets and arrow-key /
   Enter navigation. Frontmatter tags are indexed; `#tag` narrows a search, and
   a tag on its own lists every note carrying it.
@@ -66,7 +69,8 @@ a separate, GUI-independent core crate.
   `Ctrl/Cmd+W` close tab, `Ctrl/Cmd+Tab` next tab,
   `Ctrl/Cmd+Shift+T` reopen closed tab, `Alt+Left`/`Alt+Right` back and
   forward, `Ctrl/Cmd+O` quick switch, `Ctrl/Cmd+Shift+O` open vault,
-  `Ctrl/Cmd+F` search, `Ctrl/Cmd+P` command palette, `Ctrl/Cmd+G` graph,
+  `Ctrl/Cmd+F` find in note, `Ctrl/Cmd+Shift+F` search vault,
+  `Ctrl/Cmd+P` command palette, `Ctrl/Cmd+G` graph,
   `Ctrl/Cmd+Shift+P` export note, `Ctrl/Cmd+Shift+B` export vault.
 
 ## Workspace

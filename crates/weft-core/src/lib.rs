@@ -7,6 +7,7 @@ pub mod clustering;
 pub mod document;
 pub mod export;
 pub mod file_ops;
+pub mod find;
 pub mod fuzzy;
 pub mod graph;
 pub mod graph_queries;
