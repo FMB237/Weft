@@ -41,6 +41,11 @@ a separate, GUI-independent core crate.
   stats.
 - **Preview:** rendered Markdown via `egui_commonmark`, with frontmatter shown
   as a metadata card. Drag the divider to resize editor and preview.
+- **Wikilinks:** `[[note]]`, `[[note|alias]]`, and `[[note#heading]]` render as
+  links. A click opens the note in that pane (reusing a tab); Ctrl/Cmd-click or
+  middle click opens it in the other pane when split, otherwise in a new tab.
+  An unknown target shows a "No note matches" notice. Heading anchors open the
+  note without scrolling to the heading yet.
 - **File tree:** nested folders with expand/collapse and a context menu for
   new notes/folders, rename, move-to-trash, and reveal-in-file-manager.
   Deletions use the system trash, with a `.weft/trash/` fallback.

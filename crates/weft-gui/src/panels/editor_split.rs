@@ -4,7 +4,7 @@
 //! preview pane. Each pane of the workspace owns one of these, so the panel
 //! takes a pane index for its egui ids.
 
-use crate::panels::preview::PreviewPanel;
+use crate::panels::preview::{PreviewLink, PreviewPanel};
 use crate::theme::{palette, space};
 use crate::widgets::chrome::{badge, empty_state, section_header};
 use crate::widgets::{EditorBuffer, EditorMetrics, MarkdownEditor};
@@ -28,6 +28,9 @@ impl EditorSplitPanel {
     }
 
     /// Show one pane: its header, the preview, and the editable source.
+    ///
+    /// Returns the caret and scroll to remember, and the wikilink the user
+    /// clicked in the preview (if any) for the app to open.
     pub fn show(
         &mut self,
         pane: usize,
@@ -36,7 +39,7 @@ impl EditorSplitPanel {
         ctx: &egui::Context,
         font_size: f32,
         breadcrumbs: &[String],
-    ) -> EditorMetrics {
+    ) -> (EditorMetrics, Option<PreviewLink>) {
         let palette = palette(ui.ctx());
         let Some(document) = buffer.document.clone() else {
             empty_state(
@@ -44,7 +47,7 @@ impl EditorSplitPanel {
                 "No document open",
                 "Pick a note in the sidebar or create one with Ctrl+N.",
             );
-            return EditorMetrics::default();
+            return (EditorMetrics::default(), None);
         };
 
         ui.horizontal(|ui| {
@@ -94,13 +97,15 @@ impl EditorSplitPanel {
 
         // Draggable divider: the preview pane owns the right side, and the
         // editor fills the remaining space.
+        let mut link = None;
         let response = egui::SidePanel::right(split_id)
             .resizable(true)
             .default_width(preview_width)
             .width_range(min_pane..=max_preview)
             .show_inside(ui, |ui| {
                 section_header(ui, "Preview");
-                self.preview
+                link = self
+                    .preview
                     .show(ui, &Some(document.clone()), &buffer.content);
             });
 
@@ -108,7 +113,8 @@ impl EditorSplitPanel {
         self.split_ratio = (1.0 - actual_preview_width / total_width).clamp(0.0, 1.0);
 
         section_header(ui, "Source");
-        self.editor.show(pane, ui, buffer, ctx, font_size)
+        let metrics = self.editor.show(pane, ui, buffer, ctx, font_size);
+        (metrics, link)
     }
 
     /// Get the current split ratio.

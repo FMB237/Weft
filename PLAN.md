@@ -112,14 +112,18 @@ structure on top of plain notes*. That is the gap Weft closes in M5.
 **Fundamentals**
 
 - Tabs, session restore, back/forward, per-note cursor/scroll restore, and
-  breadcrumbs landed in M4. Split *panes* are modelled but not yet rendered.
+  breadcrumbs landed in M4. Two panes render side by side or stacked, each
+  with its own tabs, buffer, divider, and history.
 - The quick switcher, find & replace, and the outline panel landed in M4.
 - No `[[` or `#tag` autocomplete.
-- Wikilinks are not clickable in preview; they render as literal text.
+- Wikilinks are clickable in the preview: a plain click reuses (or opens) a
+  tab in that pane, a modifier-click opens the other pane when split (or a
+  new tab), and an unknown target shows a notice. `[[Note#Heading]]` opens
+  the note but does not scroll to the heading yet.
 - Trash, recovery snapshots, and atomic writes landed in M4. Crash recovery of
   an unsaved buffer is still missing.
 - No image paste/display, attachments, or drag-and-drop file moves.
-- No properties panel, aliases, `[[note#heading]]`, or note embeds.
+- No properties panel, aliases, note embeds, or hover previews.
 
 **Modern mechanisms**
 
@@ -248,7 +252,9 @@ recoverable before anything can bulk-edit the vault.
 - [x] `nav.rs` (in `weft-core`): per-pane back/forward stack on
       `Alt+Left/Right`, the mouse back/forward buttons, and View >
       Back/Forward. Entries carry the caret and scroll, so stepping back lands
-      where the user left. Renames rewrite entries; deletes drop them.
+      where the user left. Renames rewrite entries; deletes drop them. Every
+      pane gets a stack, and the GUI's per-pane view, history, and metrics
+      shift with the pane when one closes or its last tab moves out.
 - [x] Breadcrumbs in the editor header: `vault / folder / note.md`.
 - [x] Per-tab caret and scroll restore, saved in `.weft/workspace.toml`.
 
@@ -272,8 +278,13 @@ recoverable before anything can bulk-edit the vault.
 
 **Editor fundamentals**
 
-- [ ] Wikilinks clickable in preview (opens the note; modifier-click opens a
-      new tab).
+- [x] Wikilinks clickable in preview. Core `linkify_wikilinks` rewrites
+      `[[note]]` / `[[note|alias]]` into ordinary links with a `weft-note:`
+      scheme (fenced code and inline code are left alone), and the GUI claims
+      that scheme. A plain click reuses a tab in the pane whose preview was
+      clicked; a modifier or middle click opens the other pane when split,
+      otherwise a new tab. Unresolved targets show a notice. `[[Note#Heading]]`
+      opens the note; scrolling to the heading is still pending.
 - [ ] `[[` note autocomplete and `#` tag autocomplete from the index.
 - [ ] Smart lists: continue bullets/numbers/checkboxes on `Enter`, indent and
       outdent with `Tab`, `Enter` on an empty item ends the list.

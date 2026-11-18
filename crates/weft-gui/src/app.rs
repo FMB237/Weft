@@ -10,7 +10,7 @@ use weft_core::export::{export_document, export_vault_bundle};
 use weft_core::find::{self, Match as FindMatch};
 use weft_core::fuzzy::{self, Ranked};
 use weft_core::graph::LinkGraph;
-use weft_core::graph_updater::GraphUpdater;
+use weft_core::graph_updater::{GraphUpdater, resolve_link};
 use weft_core::history::{DEFAULT_RETENTION, HistoryStore, Snapshot};
 use weft_core::index::SearchIndex;
 use weft_core::layout_store::LayoutStore;
@@ -25,6 +25,7 @@ use egui::{CentralPanel, Key, SidePanel, TopBottomPanel};
 
 use crate::event_bus::{Event, EventBus};
 use crate::panels::editor_split::EditorSplitPanel;
+use crate::panels::preview::PreviewLink;
 use crate::panels::{PanelId, Panels};
 use crate::settings::{Settings, SettingsPanel};
 use crate::theme::palette;
@@ -102,6 +103,18 @@ struct PaneView {
     metrics: Option<EditorMetrics>,
     /// Note that `metrics` came from, so a mid-frame switch is ignored.
     rendered: Option<PathBuf>,
+}
+
+/// What a pane produced in one frame.
+///
+/// Collected while drawing and applied once every pane is done, because a tab
+/// action or a link can reload any pane's buffer.
+#[derive(Debug, Default)]
+struct PaneOutput {
+    /// Tab action the user picked in this pane's strip.
+    tab: Option<TabStripAction>,
+    /// Wikilink the user clicked in this pane's preview.
+    link: Option<PreviewLink>,
 }
 
 /// The main editor application.
@@ -205,6 +218,8 @@ pub struct EditorApp {
     search_open: bool,
     /// Notice shown when a file changed on disk while the buffer was dirty.
     external_change: Option<String>,
+    /// One-off notice, such as a link that matches no note.
+    notice: Option<String>,
     /// Whether the currently applied style is dark, for system-theme tracking.
     theme_is_dark: bool,
 }
@@ -278,6 +293,7 @@ impl EditorApp {
             recovery_preview: String::new(),
             search_open: false,
             external_change: None,
+            notice: None,
             theme_is_dark,
         };
 
@@ -373,9 +389,13 @@ impl EditorApp {
             let mut view = PaneView::default();
             view.split.split_ratio = self.editor_split_ratio;
             self.views.push(view);
-            self.nav.push(NavHistory::new());
         }
         self.views.truncate(pane_count);
+        // History is aligned separately: the app starts with one view, so
+        // growing `views` is not the same thing as creating a pane.
+        while self.nav.len() < pane_count {
+            self.nav.push(NavHistory::new());
+        }
         self.nav.truncate(pane_count);
         // A pane that emptied and closed leaves `focused` pointing past the
         // end; normalize it so it is not persisted out of range.
@@ -409,6 +429,29 @@ impl EditorApp {
     /// The focused pane's live buffer, for mutation.
     fn buffer_mut(&mut self) -> &mut EditorBuffer {
         &mut self.focused_view_mut().buffer
+    }
+
+    /// Forget one pane's live view and history.
+    ///
+    /// Pane state is indexed alongside `workspace.panes`, so when the core
+    /// removes a pane every later pane shifts down and its state must shift
+    /// with it.
+    fn forget_pane_state(&mut self, pane: usize) {
+        if pane < self.views.len() {
+            self.views.remove(pane);
+        }
+        if pane < self.nav.len() {
+            self.nav.remove(pane);
+        }
+    }
+
+    /// Close one tab, dropping the pane's state when the core removed it.
+    fn close_tab_at(&mut self, pane: usize, index: usize) {
+        let before = self.workspace.panes.len();
+        self.workspace.close_tab(pane, index);
+        if self.workspace.panes.len() < before {
+            self.forget_pane_state(pane);
+        }
     }
 
     /// The note the focused pane is showing.
@@ -700,6 +743,70 @@ impl EditorApp {
         self.open_document(path);
     }
 
+    /// Follow a wikilink clicked in a pane's preview.
+    ///
+    /// A plain click reuses (or opens) a tab in the pane whose preview was
+    /// clicked. A modifier-click opens elsewhere: the other pane when the
+    /// window is split, otherwise a new tab in the same pane, so the note
+    /// being read stays visible. Anchors (`[[Note#Heading]]`) open the note;
+    /// scrolling to the heading is not implemented yet.
+    fn open_wikilink(&mut self, pane: usize, link: &PreviewLink) {
+        let note = link
+            .target
+            .split('#')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if note.is_empty() {
+            return;
+        }
+        let Some(files) = self
+            .vault
+            .as_ref()
+            .and_then(|vault| vault.list_files().ok())
+        else {
+            return;
+        };
+        let Some(source) = self
+            .views
+            .get(pane)
+            .and_then(|view| view.buffer.document.clone())
+        else {
+            return;
+        };
+        let Some(resolved) = resolve_link(&source, &note, &files) else {
+            self.notice = Some(format!("No note matches [[{}]].", link.target));
+            return;
+        };
+        let event_path = self.vault.as_ref().map(|vault| vault.resolve(&resolved));
+
+        self.stash_pane(pane);
+        if link.new_tab && self.workspace.panes.len() > 1 {
+            let other = (0..self.workspace.panes.len())
+                .find(|candidate| *candidate != pane)
+                .unwrap_or(pane);
+            self.workspace.open_in(other, resolved);
+            self.sync_panes();
+            self.load_all_panes();
+            self.pending_focus = Some(self.pane_index());
+        } else if link.new_tab {
+            self.workspace.focused = pane;
+            self.workspace.open_new(resolved);
+            self.sync_panes();
+            self.load_pane(pane);
+            self.pending_focus = Some(self.pane_index());
+        } else {
+            self.workspace.open_in(pane, resolved);
+            self.sync_panes();
+            self.load_pane(pane);
+        }
+        self.record_nav_visit();
+        if let Some(path) = event_path {
+            let _ = self.plugins.dispatch(&PluginEvent::DocumentOpened(path));
+        }
+    }
+
     /// Close the current document, asking the user first when it is dirty.
     pub(crate) fn request_close_document(&mut self) {
         if self.open_path().is_none() {
@@ -716,7 +823,7 @@ impl EditorApp {
     fn close_document_now(&mut self) {
         let pane = self.workspace.focused;
         let index = self.workspace.focused_pane().active;
-        self.workspace.close_tab(pane, index);
+        self.close_tab_at(pane, index);
         self.load_active_tab();
     }
 
@@ -814,12 +921,7 @@ impl EditorApp {
     ///
     /// Returns the tab action the user picked, so the caller can apply it
     /// after all panes are drawn (a tab action may reload any pane).
-    fn show_pane(
-        &mut self,
-        ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        pane: usize,
-    ) -> Option<TabStripAction> {
+    fn show_pane(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, pane: usize) -> PaneOutput {
         // A click anywhere in the pane moves focus here. The click may be
         // consumed by the text editor, a tab, or a scrollbar, so this is a
         // position test rather than an interaction.
@@ -849,7 +951,9 @@ impl EditorApp {
             metrics,
             rendered,
         } = &mut self.views[pane];
-        *metrics = Some(split.show(pane, ui, buffer, ctx, self.settings.font_size, &breadcrumbs));
+        let (measured, link) =
+            split.show(pane, ui, buffer, ctx, self.settings.font_size, &breadcrumbs);
+        *metrics = Some(measured);
         rendered.clone_from(&buffer.document);
         let clicked = !ui.memory(egui::Memory::any_popup_open)
             && ui.input(|input| {
@@ -862,7 +966,7 @@ impl EditorApp {
         if clicked {
             self.focus_pane(pane);
         }
-        action
+        PaneOutput { tab: action, link }
     }
 
     /// Render the second pane as a resizable panel beside or below the first.
@@ -870,11 +974,11 @@ impl EditorApp {
         &mut self,
         ui: &mut egui::Ui,
         ctx: &egui::Context,
-        actions: &mut Vec<(usize, TabStripAction)>,
+        outputs: &mut Vec<(usize, PaneOutput)>,
     ) {
         let available = ui.available_size();
         let ratio = self.workspace.split_ratio.clamp(0.2, 0.8);
-        let mut pane_action = None;
+        let mut output = PaneOutput::default();
         // A remembered panel size from before a resize would override the
         // persisted ratio, so drop it when it disagrees.
         let split_id = egui::Id::new("workspace_split");
@@ -903,7 +1007,7 @@ impl EditorApp {
                     .default_width(available.x * (1.0 - ratio))
                     .width_range(range)
                     .show_inside(ui, |ui| {
-                        pane_action = self.show_pane(ui, ctx, 1);
+                        output = self.show_pane(ui, ctx, 1);
                     });
                 if available.x > 0.0 {
                     self.workspace.split_ratio =
@@ -917,7 +1021,7 @@ impl EditorApp {
                     .default_height(available.y * (1.0 - ratio))
                     .height_range(range)
                     .show_inside(ui, |ui| {
-                        pane_action = self.show_pane(ui, ctx, 1);
+                        output = self.show_pane(ui, ctx, 1);
                     });
                 if available.y > 0.0 {
                     self.workspace.split_ratio =
@@ -925,9 +1029,7 @@ impl EditorApp {
                 }
             }
         }
-        if let Some(action) = pane_action {
-            actions.push((1, action));
-        }
+        outputs.push((1, output));
     }
 
     /// Process pending events from the cross-panel event bus.
@@ -1307,7 +1409,9 @@ impl EditorApp {
     /// Close the focused pane, keeping its tabs in the remaining one.
     fn merge_pane(&mut self) {
         self.stash_active_tab();
+        let removed = self.workspace.focused;
         if self.workspace.merge() {
+            self.forget_pane_state(removed);
             self.sync_panes();
             self.reload_panes();
             self.pending_focus = Some(self.pane_index());
@@ -1355,8 +1459,12 @@ impl EditorApp {
         };
         self.stash_pane(pane);
         let target = self.workspace.panes[other].tabs.len();
+        let before = self.workspace.panes.len();
         if !self.workspace.move_tab(pane, index, other, target) {
             return;
+        }
+        if self.workspace.panes.len() < before {
+            self.forget_pane_state(pane);
         }
         // The core closes the source pane when its last tab leaves, so the
         // target is not necessarily `other` any more.
@@ -1377,8 +1485,9 @@ impl EditorApp {
             return;
         }
         self.stash_pane(pane);
-        self.workspace.close_tab(pane, index);
-        self.load_pane(pane);
+        self.close_tab_at(pane, index);
+        self.sync_panes();
+        self.load_pane(self.pane_index());
         self.record_nav_visit();
     }
 
@@ -2411,6 +2520,18 @@ impl eframe::App for EditorApp {
             self.external_change = None;
         }
 
+        // Transient notice, such as a wikilink that names no note.
+        let mut dismiss_info = false;
+        if let Some(notice) = self.notice.clone() {
+            let palette = palette(ctx);
+            TopBottomPanel::top("notice_banner").show(ctx, |ui| {
+                toast(ui, &notice, palette.accent, &mut dismiss_info);
+            });
+        }
+        if dismiss_info {
+            self.notice = None;
+        }
+
         // Persistent status bar: vault, note, save state, and graph stats.
         {
             let palette = palette(ctx);
@@ -2522,7 +2643,7 @@ impl eframe::App for EditorApp {
 
         // Central panel: editor split or graph view depending on active panel.
         let mut graph_moved = false;
-        let mut tab_actions: Vec<(usize, TabStripAction)> = Vec::new();
+        let mut outputs: Vec<(usize, PaneOutput)> = Vec::new();
         self.sync_panes();
         let open_path = self.open_path().map(Path::to_path_buf);
         CentralPanel::default().show(ctx, |ui| {
@@ -2538,16 +2659,19 @@ impl eframe::App for EditorApp {
                 // The second pane takes its share of the central area, so the
                 // first pane keeps the space that is left.
                 if self.views.len() > 1 {
-                    self.show_second_pane(ui, ctx, &mut tab_actions);
+                    self.show_second_pane(ui, ctx, &mut outputs);
                 }
-                if let Some(action) = self.show_pane(ui, ctx, 0) {
-                    tab_actions.push((0, action));
-                }
+                outputs.push((0, self.show_pane(ui, ctx, 0)));
             }
         });
         self.editor_split_ratio = self.views[0].split.split_ratio;
-        for (pane, action) in tab_actions {
-            self.apply_tab_action(pane, action);
+        for (pane, output) in outputs {
+            if let Some(action) = output.tab {
+                self.apply_tab_action(pane, action);
+            }
+            if let Some(link) = output.link {
+                self.open_wikilink(pane, &link);
+            }
         }
         self.record_positions();
         if self.focus_editor

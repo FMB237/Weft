@@ -32,7 +32,7 @@ dispatches them once per frame.
 |---|---|
 | `vault.rs` | Opens a vault root, reads/writes/deletes files and directories, lists markdown files and directories, skips hidden bookkeeping folders. |
 | `document.rs` | Document model and `Frontmatter`. Frontmatter is parsed as TOML first, then YAML; malformed blocks fall back to an empty frontmatter. |
-| `parser.rs` | Markdown → HTML, wikilink extraction (fenced code excluded), shared frontmatter splitting, YAML→TOML value conversion. |
+| `parser.rs` | Markdown → HTML, wikilink extraction (fenced code excluded), shared frontmatter splitting, YAML→TOML value conversion, and `linkify_wikilinks`/`wikilink_target`, which rewrite `[[note]]`/`[[note\|alias]]` into `weft-note:` links for the preview and read the target back out of a click. |
 | `graph.rs` | `LinkGraph` stored in a `slotmap`: nodes keyed by path, weighted edges, stable ids. |
 | `graph_updater.rs` | Builds and incrementally updates the graph from vault files; resolves wikilink targets and keeps unresolved links as placeholders. |
 | `layout.rs` | Deterministic force-directed layout in graph space. |
@@ -71,8 +71,14 @@ non-GUI serializer and always writes TOML.
   `views: Vec<PaneView>` aligned with its panes: each `PaneView` holds that
   pane's `EditorSplitPanel`, `EditorBuffer` (document, text, dirty flag, and
   one-shot caret/scroll hints), and the metrics from its last rendered frame.
-  `sync_panes` keeps the two in step, and `buffer()`/`buffer_mut()` reach the
-  focused pane, so a tab switch reloads one pane without touching the other.
+  `sync_panes` keeps the two in step (views and `nav` histories grow and shrink
+  with the pane list, and `forget_pane_state` shifts them when the core closes
+  a pane), and `buffer()`/`buffer_mut()` reach the focused pane, so a tab
+  switch reloads one pane without touching the other. Panes return a
+  `PaneOutput` (tab action plus clicked preview link) that `app.rs` applies
+  after every pane is drawn, because either can reload any buffer;
+  `open_wikilink` resolves the target against the vault and opens it in the
+  clicked pane, the other pane, or a new tab.
 - `theme.rs` — design tokens (`Palette`), light/dark/system resolution,
   `Theme::apply` (visuals, spacing, text styles), bundled Inter and
   `JetBrains Mono` fonts, and contrast helpers used by tests.
@@ -84,7 +90,9 @@ non-GUI serializer and always writes TOML.
   selection, cluster colouring, and theme-aware colours.
 - `panels/` — file tree, editor/preview split, graph, search, backlinks, and
   outline. `EditorSplitPanel` is instantiated per pane by `app.rs` rather than
-  held in `Panels`, so each pane keeps its own editor/preview divider.
+  held in `Panels`, so each pane keeps its own editor/preview divider. The
+  preview detours link clicks into a `PreviewLink`; browser links are passed
+  back to the platform untouched.
 
 Rendering is immediate-mode: each frame reads app state, draws, and dispatches
 events after all panels have run. Repaints are requested only when needed

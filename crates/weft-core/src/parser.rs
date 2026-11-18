@@ -200,6 +200,194 @@ fn yaml_to_toml(value: &serde_yaml::Value) -> Option<toml::Value> {
     }
 }
 
+/// URL scheme the preview uses to mark a wikilink.
+///
+/// A wikilink is rewritten as an ordinary Markdown link with this scheme, so
+/// the Markdown renderer draws it like any other link and the GUI can
+/// recognise (and claim) the click when the renderer reports it.
+pub const WIKILINK_SCHEME: &str = "weft-note:";
+
+/// Rewrite wikilinks as ordinary Markdown links for the preview.
+///
+/// `[[note]]` and `[[note|alias]]` become `[note](<weft-note:note>)`. Angle
+/// brackets keep spaces in the target intact. Fenced code blocks and inline
+/// code spans are copied verbatim, so a note explaining the `[[syntax]]`
+/// still shows the literal text instead of a link.
+///
+/// Targets that have no file part (for example `[[#heading]]`) are left
+/// alone; the GUI has no note to open for them yet.
+pub fn linkify_wikilinks(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut fence: Option<&str> = None;
+
+    for line in content.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\n', '\r']);
+        let trimmed = body.trim_start();
+        let marker = if trimmed.starts_with("```") {
+            Some("```")
+        } else if trimmed.starts_with("~~~") {
+            Some("~~~")
+        } else {
+            None
+        };
+
+        if let Some(marker) = marker {
+            match fence {
+                None => {
+                    fence = Some(marker);
+                    out.push_str(line);
+                    continue;
+                }
+                Some(open) if open == marker => {
+                    fence = None;
+                    out.push_str(line);
+                    continue;
+                }
+                Some(_) => {}
+            }
+        }
+        if fence.is_some() {
+            out.push_str(line);
+            continue;
+        }
+
+        out.push_str(&linkify_line(body));
+        out.push_str(&line[body.len()..]);
+    }
+
+    out
+}
+
+/// The note target a preview link points at, if it is a wikilink.
+pub fn wikilink_target(url: &str) -> Option<&str> {
+    url.strip_prefix(WIKILINK_SCHEME)
+}
+
+/// Linkify the wikilinks on one non-fenced line, skipping code spans.
+fn linkify_line(line: &str) -> String {
+    let bytes = line.as_bytes();
+    let mut out = String::with_capacity(line.len());
+    let mut index = 0;
+
+    while index < line.len() {
+        if bytes[index] == b'`' {
+            let ticks = bytes[index..].iter().take_while(|b| **b == b'`').count();
+            if let Some(end) = code_span_end(line, index + ticks, ticks) {
+                out.push_str(&line[index..end]);
+                index = end;
+            } else {
+                out.push_str(&line[index..index + ticks]);
+                index += ticks;
+            }
+            continue;
+        }
+
+        if line[index..].starts_with("[[")
+            && let Some(close) = line[index + 2..].find("]]")
+        {
+            let inner = &line[index + 2..index + 2 + close];
+            if let Some(link) = wikilink_markdown(inner) {
+                out.push_str(&link);
+                index = index + 2 + close + 2;
+                continue;
+            }
+        }
+
+        let Some(ch) = line[index..].chars().next() else {
+            break;
+        };
+        out.push(ch);
+        index += ch.len_utf8();
+    }
+
+    out
+}
+
+/// Byte index just past a code span opened by `ticks` backticks, if closed.
+fn code_span_end(line: &str, from: usize, ticks: usize) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut index = from;
+    while index < line.len() {
+        if bytes[index] != b'`' {
+            index += 1;
+            continue;
+        }
+        let run = bytes[index..].iter().take_while(|b| **b == b'`').count();
+        if run == ticks {
+            return Some(index + run);
+        }
+        index += run;
+    }
+    None
+}
+
+/// `[display](<weft-note:target>)` for one wikilink body, or `None` when it
+/// carries no note (an empty target, or only an anchor).
+fn wikilink_markdown(inner: &str) -> Option<String> {
+    let (target, alias) = match inner.find('|') {
+        Some(pipe) => (&inner[..pipe], Some(&inner[pipe + 1..])),
+        None => (inner, None),
+    };
+    let target = target.trim();
+    if target.split('#').next().unwrap_or("").trim().is_empty() {
+        return None;
+    }
+
+    let display = alias
+        .map(str::trim)
+        .filter(|alias| !alias.is_empty())
+        .map_or_else(|| display_name(target), ToString::to_string);
+    Some(format!(
+        "[{}](<{}{}>)",
+        escape_link_text(&display),
+        WIKILINK_SCHEME,
+        escape_destination(target)
+    ))
+}
+
+/// The text a wikilink shows when it has no alias: its file name, with the
+/// folder and the `.md` extension dropped, plus any `#anchor`.
+fn display_name(target: &str) -> String {
+    let (file, anchor) = match target.split_once('#') {
+        Some((file, anchor)) => (file, Some(anchor.trim())),
+        None => (target, None),
+    };
+    let name = file.trim().rsplit('/').next().unwrap_or(file);
+    let name = name
+        .strip_suffix(".md")
+        .or_else(|| name.strip_suffix(".markdown"))
+        .unwrap_or(name);
+    match anchor.filter(|anchor| !anchor.is_empty()) {
+        Some(anchor) => format!("{name}#{anchor}"),
+        None => name.to_string(),
+    }
+}
+
+/// Escape the characters that would end the link text early.
+fn escape_link_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if matches!(ch, '\\' | '[' | ']') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// Escape the characters `CommonMark` rejects inside a pointy-bracket link
+/// destination.
+fn escape_destination(target: &str) -> String {
+    let mut out = String::with_capacity(target.len());
+    for ch in target.chars() {
+        if matches!(ch, '\\' | '<' | '>') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 /// Render markdown to HTML (standalone helper).
 pub fn markdown_to_html(content: &str) -> String {
     let mut opts = Options::empty();
@@ -288,6 +476,82 @@ mod tests {
         let links = extract_wikilinks("[[ ]] and [[]] and [[ok]]");
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].target, "ok");
+    }
+
+    #[test]
+    fn linkify_turns_wikilinks_into_markdown_links() {
+        assert_eq!(
+            linkify_wikilinks("See [[Home]] and [[Other Page]]."),
+            "See [Home](<weft-note:Home>) and [Other Page](<weft-note:Other Page>)."
+        );
+    }
+
+    #[test]
+    fn linkify_uses_the_alias_as_link_text() {
+        assert_eq!(
+            linkify_wikilinks("See [[Home|the start page]]."),
+            "See [the start page](<weft-note:Home>)."
+        );
+    }
+
+    #[test]
+    fn linkify_shows_the_file_stem_for_paths_and_anchors() {
+        assert_eq!(
+            linkify_wikilinks("[[journal/2026-02-01.md]]"),
+            "[2026-02-01](<weft-note:journal/2026-02-01.md>)"
+        );
+        assert_eq!(
+            linkify_wikilinks("[[Home#Welcome]]"),
+            "[Home#Welcome](<weft-note:Home#Welcome>)"
+        );
+    }
+
+    #[test]
+    fn linkify_skips_fenced_blocks_and_code_spans() {
+        let content = "```\n[[fenced]]\n```\n\n`[[span]]` and [[real]]\n";
+        assert_eq!(
+            linkify_wikilinks(content),
+            "```\n[[fenced]]\n```\n\n`[[span]]` and [real](<weft-note:real>)\n"
+        );
+    }
+
+    #[test]
+    fn linkify_leaves_anchor_only_links_alone() {
+        assert_eq!(linkify_wikilinks("[[#Heading]]"), "[[#Heading]]");
+        assert_eq!(linkify_wikilinks("[[]]"), "[[]]");
+    }
+
+    #[test]
+    fn linkify_escapes_link_text_and_destination() {
+        assert_eq!(
+            linkify_wikilinks("[[a<b|c\\[d]]]"),
+            "[c\\\\\\[d](<weft-note:a\\<b>)]"
+        );
+    }
+
+    #[test]
+    fn wikilink_target_reads_back_the_scheme() {
+        assert_eq!(wikilink_target("weft-note:Home"), Some("Home"));
+        assert_eq!(
+            wikilink_target("weft-note:My Note#Top"),
+            Some("My Note#Top")
+        );
+        assert_eq!(wikilink_target("https://example.com"), None);
+    }
+
+    #[test]
+    fn linkified_targets_survive_markdown_parsing() {
+        // The preview reads pulldown-cmark events, so check the destination
+        // the renderer will hand it (the HTML writer percent-encodes spaces,
+        // which does not matter here).
+        let text = linkify_wikilinks("[[My Note|read this]]");
+        let destination = Parser::new_ext(&text, Options::empty()).find_map(|event| match event {
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Link { dest_url, .. }) => {
+                Some(dest_url.to_string())
+            }
+            _ => None,
+        });
+        assert_eq!(destination.as_deref(), Some("weft-note:My Note"));
     }
 
     #[test]
