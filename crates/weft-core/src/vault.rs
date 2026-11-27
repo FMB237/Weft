@@ -1,6 +1,8 @@
+use crate::daily::DailyConfig;
 use crate::graph_updater::AliasMap;
 use crate::parser;
 use crate::properties::PropertySchema;
+use crate::templates::TemplatesConfig;
 use crate::views::ViewRegistry;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -24,6 +26,12 @@ pub struct VaultConfig {
     /// Property definitions from vault.toml [properties] section.
     #[serde(default)]
     pub properties: PropertySchema,
+    /// Daily note configuration from vault.toml [daily] section.
+    #[serde(default)]
+    pub daily: DailyConfig,
+    /// Template configuration from vault.toml [templates] section.
+    #[serde(default)]
+    pub templates: TemplatesConfig,
 }
 
 impl Default for VaultConfig {
@@ -32,6 +40,8 @@ impl Default for VaultConfig {
             name: "default".into(),
             extensions: vec!["md".into(), "markdown".into()],
             properties: PropertySchema::default(),
+            daily: DailyConfig::default(),
+            templates: TemplatesConfig::default(),
         }
     }
 }
@@ -111,6 +121,16 @@ impl Vault {
     /// Get a mutable reference to the property schema.
     pub fn property_schema_mut(&mut self) -> &mut PropertySchema {
         &mut self.property_schema
+    }
+
+    /// Get the daily note configuration.
+    pub fn daily_config(&self) -> &DailyConfig {
+        &self.config.daily
+    }
+
+    /// Get the templates configuration.
+    pub fn templates_config(&self) -> &TemplatesConfig {
+        &self.config.templates
     }
 
     /// List all markdown files in the vault recursively, relative to the vault root.
