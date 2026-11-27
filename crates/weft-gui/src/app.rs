@@ -195,6 +195,8 @@ pub struct EditorApp {
     views_open: bool,
     /// Whether the tasks panel is shown.
     tasks_open: bool,
+    /// Whether the calendar panel is shown.
+    calendar_open: bool,
     /// Pane whose editor should take keyboard focus next frame.
     pending_focus: Option<usize>,
     /// Whether the quick switcher is open.
@@ -307,6 +309,7 @@ impl EditorApp {
             properties_open: false,
             views_open: false,
             tasks_open: false,
+            calendar_open: false,
             pending_focus: None,
             quick_open: false,
             quick_input: String::new(),
@@ -3087,6 +3090,13 @@ impl eframe::App for EditorApp {
                         self.tasks_open = !self.tasks_open;
                         ui.close_menu();
                     }
+                    if ui
+                        .selectable_label(self.calendar_open, "Calendar")
+                        .clicked()
+                    {
+                        self.calendar_open = !self.calendar_open;
+                        ui.close_menu();
+                    }
                     ui.separator();
                     let can_split = self.workspace.panes.len() < MAX_PANES;
                     if ui
@@ -3393,6 +3403,18 @@ impl eframe::App for EditorApp {
                 .width_range(250.0..=600.0)
                 .show(ctx, |ui| {
                     self.panels.tasks.show(ui, vault, &mut self.event_bus);
+                });
+        }
+
+        // Right side panel: calendar panel.
+        if self.calendar_open {
+            let vault = self.vault.as_mut().expect("vault must be open");
+            SidePanel::right("calendar")
+                .resizable(true)
+                .default_width(320.0)
+                .width_range(250.0..=600.0)
+                .show(ctx, |ui| {
+                    self.panels.calendar.show(ui, vault, &mut self.event_bus);
                 });
         }
 

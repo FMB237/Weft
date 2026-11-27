@@ -355,13 +355,13 @@ board without touching Markdown, and dragging a card changes its frontmatter.
 
 **Goal:** a reason to open Weft every morning.
 
-- [ ] `daily.rs`: daily-note folder and filename format from `vault.toml`;
+- [x] `daily.rs`: daily-note folder and filename format from `vault.toml`;
       ribbon button and `Ctrl+Shift+D`; opens or creates today's note.
-- [ ] `templates.rs`: template folder, `{{date}}`, `{{time}}`, `{{title}}`,
+- [x] `templates.rs`: template folder, `{{date}}`, `{{time}}`, `{{title}}`,
       `{{cursor}}`; used by daily notes and "new from template".
-- [ ] `tasks.rs`: extract `- [ ]` items with note, line, text, due date, and
+- [x] `tasks.rs`: extract `- [ ]` items with note, line, text, due date, and
       priority from properties.
-- [ ] Tasks view: **Today**, **Upcoming**, **Inbox**, **Done** buckets; toggle
+- [x] Tasks view: **Today**, **Upcoming**, **Inbox**, **Done** buckets; toggle
       completion writes back to the source line.
 - [ ] **Calendar view**: month grid, notes by date property or daily note.
 - [ ] **Timeline view**: notes on a horizontal axis by date range.

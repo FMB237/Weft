@@ -4,6 +4,7 @@
 //! panels, and sub-modules for each individual panel.
 
 pub mod backlinks;
+pub mod calendar;
 pub mod editor_split;
 pub mod file_tree;
 pub mod graph;
@@ -15,6 +16,7 @@ pub mod tasks;
 pub mod views;
 
 use crate::panels::backlinks::BacklinksPanel;
+use crate::panels::calendar::CalendarPanel;
 use crate::panels::file_tree::FileTreePanel;
 use crate::panels::graph::GraphPanel;
 use crate::panels::outline::OutlinePanel;
@@ -37,6 +39,7 @@ pub enum PanelId {
     Properties,
     Views,
     Tasks,
+    Calendar,
 }
 
 /// Container for all UI panels.
@@ -65,6 +68,8 @@ pub struct Panels {
     pub views: ViewsPanel,
     /// Tasks panel for managing tasks across the vault.
     pub tasks: TasksPanel,
+    /// Calendar panel for viewing notes by date.
+    pub calendar: CalendarPanel,
 }
 
 impl Default for Panels {
@@ -87,6 +92,7 @@ impl Panels {
             properties: PropertiesPanel::new(),
             views: ViewsPanel::new(),
             tasks: TasksPanel::new(),
+            calendar: CalendarPanel::new(),
         }
     }
 
