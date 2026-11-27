@@ -197,6 +197,8 @@ pub struct EditorApp {
     tasks_open: bool,
     /// Whether the calendar panel is shown.
     calendar_open: bool,
+    /// Whether the timeline panel is shown.
+    timeline_open: bool,
     /// Pane whose editor should take keyboard focus next frame.
     pending_focus: Option<usize>,
     /// Whether the quick switcher is open.
@@ -310,6 +312,7 @@ impl EditorApp {
             views_open: false,
             tasks_open: false,
             calendar_open: false,
+            timeline_open: false,
             pending_focus: None,
             quick_open: false,
             quick_input: String::new(),
@@ -3097,6 +3100,13 @@ impl eframe::App for EditorApp {
                         self.calendar_open = !self.calendar_open;
                         ui.close_menu();
                     }
+                    if ui
+                        .selectable_label(self.timeline_open, "Timeline")
+                        .clicked()
+                    {
+                        self.timeline_open = !self.timeline_open;
+                        ui.close_menu();
+                    }
                     ui.separator();
                     let can_split = self.workspace.panes.len() < MAX_PANES;
                     if ui
@@ -3415,6 +3425,18 @@ impl eframe::App for EditorApp {
                 .width_range(250.0..=600.0)
                 .show(ctx, |ui| {
                     self.panels.calendar.show(ui, vault, &mut self.event_bus);
+                });
+        }
+
+        // Right side panel: timeline panel.
+        if self.timeline_open {
+            let vault = self.vault.as_mut().expect("vault must be open");
+            SidePanel::right("timeline")
+                .resizable(true)
+                .default_width(400.0)
+                .width_range(300.0..=800.0)
+                .show(ctx, |ui| {
+                    self.panels.timeline.show(ui, vault, &mut self.event_bus);
                 });
         }
 

@@ -363,8 +363,8 @@ board without touching Markdown, and dragging a card changes its frontmatter.
       priority from properties.
 - [x] Tasks view: **Today**, **Upcoming**, **Inbox**, **Done** buckets; toggle
       completion writes back to the source line.
-- [ ] **Calendar view**: month grid, notes by date property or daily note.
-- [ ] **Timeline view**: notes on a horizontal axis by date range.
+- [x] **Calendar view**: month grid, notes by date property or daily note.
+- [x] **Timeline view**: notes on a horizontal axis by date range.
 - [ ] Agenda panel on the right: today's tasks + today's daily note.
 
 **Done when:** one shortcut opens today's note, and every open task in the

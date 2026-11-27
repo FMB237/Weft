@@ -13,6 +13,7 @@ pub mod preview;
 pub mod properties;
 pub mod search;
 pub mod tasks;
+pub mod timeline;
 pub mod views;
 
 use crate::panels::backlinks::BacklinksPanel;
@@ -24,6 +25,7 @@ use crate::panels::preview::PreviewPanel;
 use crate::panels::properties::PropertiesPanel;
 use crate::panels::search::SearchPanel;
 use crate::panels::tasks::TasksPanel;
+use crate::panels::timeline::TimelinePanel;
 use crate::panels::views::ViewsPanel;
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +42,7 @@ pub enum PanelId {
     Views,
     Tasks,
     Calendar,
+    Timeline,
 }
 
 /// Container for all UI panels.
@@ -70,6 +73,8 @@ pub struct Panels {
     pub tasks: TasksPanel,
     /// Calendar panel for viewing notes by date.
     pub calendar: CalendarPanel,
+    /// Timeline panel for viewing notes on a horizontal time axis.
+    pub timeline: TimelinePanel,
 }
 
 impl Default for Panels {
@@ -93,6 +98,7 @@ impl Panels {
             views: ViewsPanel::new(),
             tasks: TasksPanel::new(),
             calendar: CalendarPanel::new(),
+            timeline: TimelinePanel::new(),
         }
     }
 
