@@ -11,6 +11,7 @@ pub mod outline;
 pub mod preview;
 pub mod properties;
 pub mod search;
+pub mod tasks;
 pub mod views;
 
 use crate::panels::backlinks::BacklinksPanel;
@@ -20,6 +21,7 @@ use crate::panels::outline::OutlinePanel;
 use crate::panels::preview::PreviewPanel;
 use crate::panels::properties::PropertiesPanel;
 use crate::panels::search::SearchPanel;
+use crate::panels::tasks::TasksPanel;
 use crate::panels::views::ViewsPanel;
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +36,7 @@ pub enum PanelId {
     Search,
     Properties,
     Views,
+    Tasks,
 }
 
 /// Container for all UI panels.
@@ -60,6 +63,8 @@ pub struct Panels {
     pub properties: PropertiesPanel,
     /// Views panel for table/cards/board views.
     pub views: ViewsPanel,
+    /// Tasks panel for managing tasks across the vault.
+    pub tasks: TasksPanel,
 }
 
 impl Default for Panels {
@@ -81,6 +86,7 @@ impl Panels {
             outline: OutlinePanel::new(),
             properties: PropertiesPanel::new(),
             views: ViewsPanel::new(),
+            tasks: TasksPanel::new(),
         }
     }
 

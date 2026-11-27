@@ -193,6 +193,8 @@ pub struct EditorApp {
     properties_open: bool,
     /// Whether the views panel is shown.
     views_open: bool,
+    /// Whether the tasks panel is shown.
+    tasks_open: bool,
     /// Pane whose editor should take keyboard focus next frame.
     pending_focus: Option<usize>,
     /// Whether the quick switcher is open.
@@ -304,6 +306,7 @@ impl EditorApp {
             outline_open: false,
             properties_open: false,
             views_open: false,
+            tasks_open: false,
             pending_focus: None,
             quick_open: false,
             quick_input: String::new(),
@@ -3080,6 +3083,10 @@ impl eframe::App for EditorApp {
                         self.views_open = !self.views_open;
                         ui.close_menu();
                     }
+                    if ui.selectable_label(self.tasks_open, "Tasks").clicked() {
+                        self.tasks_open = !self.tasks_open;
+                        ui.close_menu();
+                    }
                     ui.separator();
                     let can_split = self.workspace.panes.len() < MAX_PANES;
                     if ui
@@ -3375,6 +3382,18 @@ impl eframe::App for EditorApp {
 
             // Show save view dialog if open (needs to be outside side panel for modal)
             self.panels.views.show_save_view_dialog(ctx, vault);
+        }
+
+        // Right side panel: tasks panel.
+        if self.tasks_open {
+            let vault = self.vault.as_mut().expect("vault must be open");
+            SidePanel::right("tasks")
+                .resizable(true)
+                .default_width(320.0)
+                .width_range(250.0..=600.0)
+                .show(ctx, |ui| {
+                    self.panels.tasks.show(ui, vault, &mut self.event_bus);
+                });
         }
 
         // Central panel: editor split or graph view depending on active panel.
