@@ -64,6 +64,10 @@ pub enum TabStripAction {
 
 /// A strip of document tabs with a dirty marker, close buttons, and a
 /// right-click menu. Returns the action the user picked, if any.
+#[allow(
+    clippy::too_many_lines,
+    reason = "tab strip renders buttons, menus, and drag-drop"
+)]
 pub fn document_tabs(
     ui: &mut Ui,
     pane_index: usize,

@@ -138,6 +138,10 @@ impl MarkdownEditor {
     /// position, or selection for this frame and are cleared, so a tab switch,
     /// a back/forward jump, or a click in the outline lands where the user
     /// asked.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "editor show handles layout, highlighting, autocomplete, smart lists, and drag-drop"
+    )]
     pub fn show(
         &mut self,
         pane: usize,
@@ -381,15 +385,13 @@ impl MarkdownEditor {
         // Check if we're already showing completions
         if buffer.completion.open {
             // Handle keyboard navigation
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                if buffer.completion.selected < buffer.completion.items.len().saturating_sub(1) {
-                    buffer.completion.selected += 1;
-                }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown))
+                && buffer.completion.selected < buffer.completion.items.len().saturating_sub(1)
+            {
+                buffer.completion.selected += 1;
             }
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-                if buffer.completion.selected > 0 {
-                    buffer.completion.selected -= 1;
-                }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) && buffer.completion.selected > 0 {
+                buffer.completion.selected -= 1;
             }
             if ui.input(|i| i.key_pressed(egui::Key::Enter))
                 || ui.input(|i| i.key_pressed(egui::Key::Tab))
@@ -489,14 +491,14 @@ impl MarkdownEditor {
         }
 
         // Get tags from vault
-        if let Some(vault) = vault {
-            if let Ok(files) = vault.list_files() {
-                for file in files {
-                    if let Ok(content) = vault.read(&file) {
-                        let fm = weft_core::parser::parse_frontmatter(&content);
-                        for tag in &fm.tags {
-                            tags.insert(tag.clone());
-                        }
+        if let Some(vault) = vault
+            && let Ok(files) = vault.list_files()
+        {
+            for file in files {
+                if let Ok(content) = vault.read(&file) {
+                    let fm = weft_core::parser::parse_frontmatter(&content);
+                    for tag in &fm.tags {
+                        tags.insert(tag.clone());
                     }
                 }
             }

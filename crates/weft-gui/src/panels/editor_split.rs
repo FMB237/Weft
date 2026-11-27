@@ -35,6 +35,10 @@ impl EditorSplitPanel {
     ///
     /// Returns the caret and scroll to remember, and the wikilink the user
     /// clicked in the preview (if any) for the app to open.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "show function has many parameters for editor setup"
+    )]
     pub fn show(
         &mut self,
         pane: usize,
@@ -116,7 +120,7 @@ impl EditorSplitPanel {
                     && (state.size().x - preview_width).abs() > 1.0
                 {
                     ui.ctx().data_mut(|data| {
-                        data.remove::<egui::containers::panel::PanelState>(split_id)
+                        data.remove::<egui::containers::panel::PanelState>(split_id);
                     });
                 }
 

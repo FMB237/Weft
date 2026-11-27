@@ -533,6 +533,10 @@ impl ViewsPanel {
             });
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "property cell editing needs many parameters"
+    )]
     fn show_editable_property_cell(
         &mut self,
         ui: &mut Ui,
@@ -773,6 +777,10 @@ impl ViewsPanel {
         });
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "board view renders columns, cards, and drag-drop"
+    )]
     fn show_board_view(
         &mut self,
         ui: &mut Ui,
@@ -1013,10 +1021,9 @@ impl ViewsPanel {
             self.selected_view_id
                 .as_ref()
                 .and_then(|id| vault.view_registry().views.get(id)),
-        ) {
-            if !view.columns.is_empty() {
-                return view.columns.clone();
-            }
+        ) && !view.columns.is_empty()
+        {
+            return view.columns.clone();
         }
         // Default to schema-defined properties that are not hidden
         let schema = vault.property_schema();

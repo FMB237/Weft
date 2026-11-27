@@ -2469,6 +2469,10 @@ impl EditorApp {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "command palette rendering is complex"
+    )]
     fn render_command_palette(&mut self, ctx: &egui::Context) {
         // Command definition for the palette
         struct Command {

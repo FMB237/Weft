@@ -80,9 +80,10 @@ impl FileTreePanel {
     }
 
     /// Show the file tree, populated from the open vault.
-    #[expect(
+    #[allow(
         clippy::too_many_lines,
-        reason = "the tree panel renders rows, context menus, and dialogs in one place"
+        clippy::too_many_arguments,
+        reason = "file tree show renders rows, context menus, dialogs, and needs many parameters"
     )]
     pub fn show(
         &mut self,

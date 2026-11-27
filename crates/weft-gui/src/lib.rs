@@ -6,6 +6,11 @@
     clippy::print_stderr,
     reason = "GUI has no logging backend until the M1 logging pass"
 )]
+#![allow(
+    clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
+    reason = "allow attributes with reasons are used to suppress known clippy issues"
+)]
 
 pub mod app;
 pub mod event_bus;
