@@ -1057,6 +1057,59 @@ impl EditorApp {
         }
     }
 
+    /// Open or create today's daily note.
+    pub(crate) fn open_daily_note(&mut self) {
+        let Some(vault) = &self.vault else { return };
+        let config = vault.daily_config().clone();
+        let today = chrono::Local::now().date_naive();
+        let path = weft_core::daily::todays_daily_note_path(&vault.root, &config);
+
+        // Create from template if it doesn't exist
+        if !path.exists() {
+            let _ = weft_core::daily::create_daily_note(&vault.root, &config, today);
+        }
+
+        self.request_open_document(&path);
+    }
+
+    /// Show the "New from Template" dialog and create a new note from the selected template.
+    fn show_new_from_template(&mut self) {
+        let Some(vault) = &self.vault else { return };
+        let config = vault.templates_config().clone();
+        let templates =
+            weft_core::templates::list_templates(&vault.root, &config).unwrap_or_default();
+
+        if templates.is_empty() {
+            self.notice =
+                Some("No templates found. Create .md files in .weft/templates/".to_string());
+            return;
+        }
+
+        // For now, just pick the first template; in the future this could be a dialog
+        if let Some(template_path) = templates.first() {
+            let name = template_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
+            if let Ok(content) = weft_core::templates::read_template(&vault.root, &config, name) {
+                let title = "Untitled";
+                let rendered =
+                    weft_core::templates::create_from_template(&content.unwrap_or_default(), title);
+                let vault_root = vault.root.clone();
+                let path = weft_core::templates::create_template(
+                    &vault_root,
+                    &config,
+                    "untitled",
+                    &rendered,
+                )
+                .ok();
+                if let Some(path) = path {
+                    self.request_open_document(&path);
+                }
+            }
+        }
+    }
+
     /// Auto-save the current document if dirty and enough time has passed.
     pub(crate) fn maybe_auto_save(&mut self) {
         if !self.buffer().dirty {
@@ -2723,9 +2776,7 @@ impl EditorApp {
                 category: "Tools",
                 shortcut: Some("Ctrl+Shift+D"),
                 context: "vault",
-                action: |_app, _| {
-                    // TODO: M6 daily note
-                },
+                action: |app, _| app.open_daily_note(),
             },
             Command {
                 id: "tools.new_from_template",
@@ -2733,9 +2784,7 @@ impl EditorApp {
                 category: "Tools",
                 shortcut: None,
                 context: "vault",
-                action: |_app, _| {
-                    // TODO: M6 templates
-                },
+                action: |app, _| app.show_new_from_template(),
             },
         ];
 
