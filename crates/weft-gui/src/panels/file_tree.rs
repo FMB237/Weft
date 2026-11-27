@@ -35,6 +35,13 @@ struct RenameState {
     value: String,
 }
 
+/// Payload for file tree drag and drop (note path to insert as wikilink).
+#[derive(Clone)]
+struct TreeDragPayload {
+    _note_path: PathBuf,
+    _note_name: String,
+}
+
 #[derive(Debug)]
 pub struct FileTreePanel {
     /// Directories currently expanded.
@@ -84,6 +91,8 @@ impl FileTreePanel {
         active: Option<&Path>,
         dirty: bool,
         event_bus: &mut EventBus,
+        recent_notes: &[PathBuf],
+        pinned_notes: &[PathBuf],
     ) {
         let palette = palette(ui.ctx());
         section_header(ui, "Files");
@@ -102,6 +111,66 @@ impl FileTreePanel {
                 .size(12.0)
                 .color(palette.text_muted),
         );
+
+        // Pinned notes section
+        if !pinned_notes.is_empty() {
+            ui.separator();
+            ui.label(
+                RichText::new("📌 Pinned")
+                    .size(11.0)
+                    .strong()
+                    .color(palette.accent),
+            );
+            for path in pinned_notes {
+                let name = path
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default();
+                let selected = active == Some(path.as_path());
+                let resp = ui.selectable_label(selected, format!("📌 {name}"));
+                if resp.clicked() {
+                    event_bus.publish(Event::NodeSelected(path.clone()));
+                }
+                resp.context_menu(|ui| {
+                    if ui.button("Unpin").clicked() {
+                        event_bus.publish(Event::UnpinNote(path.clone()));
+                        ui.close_menu();
+                    }
+                });
+            }
+        }
+
+        // Recent notes section
+        if !recent_notes.is_empty() {
+            ui.separator();
+            ui.label(
+                RichText::new("🕐 Recent")
+                    .size(11.0)
+                    .strong()
+                    .color(palette.accent),
+            );
+            for path in recent_notes {
+                // Skip if already pinned
+                if pinned_notes.contains(path) {
+                    continue;
+                }
+                let name = path
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default();
+                let selected = active == Some(path.as_path());
+                let resp = ui.selectable_label(selected, format!("🕐 {name}"));
+                if resp.clicked() {
+                    event_bus.publish(Event::NodeSelected(path.clone()));
+                }
+                resp.context_menu(|ui| {
+                    if ui.button("Pin").clicked() {
+                        event_bus.publish(Event::PinNote(path.clone()));
+                        ui.close_menu();
+                    }
+                });
+            }
+        }
 
         let (Ok(files), Ok(dirs)) = (vault.list_files(), vault.list_dirs()) else {
             ui.label("Failed to list vault files.");
@@ -202,6 +271,21 @@ impl FileTreePanel {
                                 } else {
                                     clicked_node = Some(row.path.clone());
                                 }
+                            }
+
+                            // Make note files draggable for wikilink insertion
+                            if !row.is_dir {
+                                let payload = TreeDragPayload {
+                                    _note_path: row.path.clone(),
+                                    _note_name: row.name.clone(),
+                                };
+                                ui.dnd_drag_source(
+                                    egui::Id::new("tree_drag").with(&row.path),
+                                    payload,
+                                    |ui| {
+                                        ui.label(format!("📄 {}", row.name));
+                                    },
+                                );
                             }
 
                             let target_dir = if row.is_dir {

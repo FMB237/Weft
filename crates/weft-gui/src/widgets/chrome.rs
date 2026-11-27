@@ -58,6 +58,8 @@ pub enum TabStripAction {
     ReopenClosed,
     /// Create a note in a new tab.
     NewTab,
+    /// Change the view mode of a tab.
+    SetMode(usize, weft_core::workspace::TabMode),
 }
 
 /// A strip of document tabs with a dirty marker, close buttons, and a
@@ -121,6 +123,48 @@ pub fn document_tabs(
                                 action = Some(TabStripAction::MoveToOtherPane(index));
                                 ui.close_menu();
                             }
+                            ui.separator();
+                            ui.menu_button("View Mode", |ui| {
+                                if ui
+                                    .selectable_label(
+                                        tab.mode == weft_core::workspace::TabMode::Source,
+                                        "Source",
+                                    )
+                                    .clicked()
+                                {
+                                    action = Some(TabStripAction::SetMode(
+                                        index,
+                                        weft_core::workspace::TabMode::Source,
+                                    ));
+                                    ui.close_menu();
+                                }
+                                if ui
+                                    .selectable_label(
+                                        tab.mode == weft_core::workspace::TabMode::Split,
+                                        "Split",
+                                    )
+                                    .clicked()
+                                {
+                                    action = Some(TabStripAction::SetMode(
+                                        index,
+                                        weft_core::workspace::TabMode::Split,
+                                    ));
+                                    ui.close_menu();
+                                }
+                                if ui
+                                    .selectable_label(
+                                        tab.mode == weft_core::workspace::TabMode::Preview,
+                                        "Preview",
+                                    )
+                                    .clicked()
+                                {
+                                    action = Some(TabStripAction::SetMode(
+                                        index,
+                                        weft_core::workspace::TabMode::Preview,
+                                    ));
+                                    ui.close_menu();
+                                }
+                            });
                         });
                         if ui
                             .add(

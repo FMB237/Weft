@@ -20,6 +20,7 @@ pub struct GraphUpdater<'a> {
     graph: &'a mut LinkGraph,
     vault: &'a dyn FileOps,
     files: Vec<PathBuf>,
+    alias_map: HashMap<String, PathBuf>,
 }
 
 impl std::fmt::Debug for GraphUpdater<'_> {
@@ -33,10 +34,12 @@ impl std::fmt::Debug for GraphUpdater<'_> {
 impl<'a> GraphUpdater<'a> {
     pub fn new(graph: &'a mut LinkGraph, vault: &'a dyn FileOps) -> Self {
         let files = vault.list_files().unwrap_or_default();
+        let alias_map = vault.build_alias_index().unwrap_or_default();
         Self {
             graph,
             vault,
             files,
+            alias_map,
         }
     }
 
@@ -61,6 +64,7 @@ impl<'a> GraphUpdater<'a> {
     pub fn rebuild(&mut self) -> anyhow::Result<()> {
         self.graph.clear();
         self.files = self.vault.list_files()?;
+        self.alias_map = self.vault.build_alias_index().unwrap_or_default();
         let files = self.files.clone();
         for path in &files {
             // A single unreadable file should not abort the whole rebuild.
@@ -107,7 +111,7 @@ impl<'a> GraphUpdater<'a> {
             if target.is_empty() {
                 continue;
             }
-            let resolved_path = resolve_link(path, target, &self.files);
+            let resolved_path = resolve_link(path, target, &self.files, Some(&self.alias_map));
             let exists = resolved_path.is_some();
             let target_path = resolved_path.unwrap_or_else(|| unresolved_path(target));
 
@@ -148,6 +152,9 @@ impl<'a> GraphUpdater<'a> {
     }
 }
 
+/// Alias to note path, as read from frontmatter `aliases:`.
+pub type AliasMap = HashMap<String, PathBuf>;
+
 /// Resolve a wikilink target to a file in `files`, following the order used by
 /// Obsidian as closely as a small vault needs:
 ///
@@ -155,12 +162,25 @@ impl<'a> GraphUpdater<'a> {
 /// 2. the same path with `.md` appended
 /// 3. case-insensitive full-path or file-stem match (same directory first)
 /// 4. exact or case-insensitive match from the vault root
+/// 5. alias match (from frontmatter `aliases:`)
 ///
 /// Returns `None` when nothing matches; the caller creates a placeholder.
-pub fn resolve_link(source: &Path, target: &str, files: &[PathBuf]) -> Option<PathBuf> {
+pub fn resolve_link(
+    source: &Path,
+    target: &str,
+    files: &[PathBuf],
+    alias_map: Option<&AliasMap>,
+) -> Option<PathBuf> {
     let target = target.trim().trim_start_matches("./");
     if target.is_empty() {
         return None;
+    }
+
+    let target_lower = target.to_lowercase();
+
+    // Check aliases first (before path resolution)
+    if let Some(found) = alias_map.and_then(|map| map.get(&target_lower)) {
+        return Some(found.clone());
     }
 
     let source_dir = source.parent().unwrap_or_else(|| Path::new(""));
@@ -526,21 +546,24 @@ mod tests {
         ];
 
         assert_eq!(
-            resolve_link(Path::new("README.md"), "Home", &files),
+            resolve_link(Path::new("README.md"), "Home", &files, None),
             Some(PathBuf::from("Home.md"))
         );
         assert_eq!(
-            resolve_link(Path::new("README.md"), "Projects/Alpha", &files),
+            resolve_link(Path::new("README.md"), "Projects/Alpha", &files, None),
             Some(PathBuf::from("sub/alpha.md"))
         );
         assert_eq!(
-            resolve_link(Path::new("sub/alpha.md"), "Meeting Notes", &files),
+            resolve_link(Path::new("sub/alpha.md"), "Meeting Notes", &files, None),
             Some(PathBuf::from("Meeting Notes.md"))
         );
         assert_eq!(
-            resolve_link(Path::new("README.md"), "home", &files),
+            resolve_link(Path::new("README.md"), "home", &files, None),
             Some(PathBuf::from("Home.md"))
         );
-        assert_eq!(resolve_link(Path::new("README.md"), "Nope", &files), None);
+        assert_eq!(
+            resolve_link(Path::new("README.md"), "Nope", &files, None),
+            None
+        );
     }
 }

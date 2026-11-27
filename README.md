@@ -5,11 +5,13 @@ editor, a live wikilink graph, backlinks, and full-text search. Desktop UI is
 built with **eframe/egui**; storage, parsing, graph, search and export live in
 a separate, GUI-independent core crate.
 
-> **Status:** M4 in progress. The workspace now opens notes in tabs, keeps
+> **Status:** M4 + M5 complete. The workspace now opens notes in tabs, keeps
 > unsaved buffers per tab, and restores the session from
 > `<vault>/.weft/workspace.toml`. M3's design system, YAML/TOML frontmatter,
 > live link graph, backlinks, full-text search, and background watcher are all
-> still in place. See [docs/roadmap.md](docs/roadmap.md) for what comes next.
+> still in place. M4 adds smart lists, autocomplete, crash recovery. M5 adds
+> typed properties, query engine, and table/cards/board views. See
+> [docs/roadmap.md](docs/roadmap.md) for what comes next (M6: daily notes, tasks, calendar).
 
 ![Editor and preview](docs/screenshot.png)
 
@@ -76,6 +78,23 @@ a separate, GUI-independent core crate.
 - **Live updates:** a background watcher applies external edits to the graph
   and index, reloads clean buffers, and shows a conflict banner instead of
   overwriting unsaved edits.
+- **Crash recovery:** unsaved buffers are periodically saved to
+  `.weft/crash_recovery/`; on restart, a dialog offers to restore them.
+- **Autocomplete:** type `[[` or `#` in the editor for a fuzzy popup of notes
+  or tags; arrow/Enter to insert.
+- **Smart lists:** `Enter` continues bullets, numbers, or checkboxes;
+  `Tab`/`Shift+Tab` indents/outdents; `Enter` on an empty item ends the list.
+- **Properties:** typed frontmatter (`text`, `number`, `date`, `bool`,
+  `select`, `multi-select`, `link`, `tags`) with inference from values and
+  overrides in `vault.toml`. View > Properties opens a form-style panel that
+  writes back without losing unknown keys.
+- **Query engine:** filter (all/any, `is`, `contains`, `before`, `after`,
+  `empty`), sort, group-by; used by the views panel and search bar.
+- **Views:** saved configurations (filter, sort, group, columns, layout) in
+  `.weft/views.toml`. View > Views opens a panel with:
+  - **Table view:** sortable columns, inline property editing, CSV export.
+  - **Cards view:** gallery of note cards with chosen subtitle property.
+  - **Board view:** kanban columns by a select property; drag cards to move.
 - **Frontmatter:** TOML (`key = value`) or YAML (`key: value`) blocks, including
   block tag lists. Parsing is tolerant and the raw block is preserved on save.
 - **Export:** a note to standalone HTML (with escaped titles), or the whole

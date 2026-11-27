@@ -30,6 +30,10 @@ pub enum Event {
     EntryDeleted(PathBuf),
     /// Theme changed.
     ThemeChanged,
+    /// Pin a note to the file tree sidebar.
+    PinNote(PathBuf),
+    /// Unpin a note from the file tree sidebar.
+    UnpinNote(PathBuf),
 }
 
 /// A callback that handles an event.

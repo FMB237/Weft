@@ -30,7 +30,7 @@ dispatches them once per frame.
 
 | Module | Responsibility |
 |---|---|
-| `vault.rs` | Opens a vault root, reads/writes/deletes files and directories, lists markdown files and directories, skips hidden bookkeeping folders. |
+| `vault.rs` | Opens a vault root, reads/writes/deletes files and directories, lists markdown files and directories, skips hidden bookkeeping folders. Loads/saves view registry from `.weft/views.toml` and property schema from `vault.toml`. |
 | `document.rs` | Document model and `Frontmatter`. Frontmatter is parsed as TOML first, then YAML; malformed blocks fall back to an empty frontmatter. |
 | `parser.rs` | Markdown → HTML, wikilink extraction (fenced code excluded), shared frontmatter splitting, YAML→TOML value conversion, and `linkify_wikilinks`/`wikilink_target`, which rewrite `[[note]]`/`[[note\|alias]]` into `weft-note:` links for the preview and read the target back out of a click. |
 | `graph.rs` | `LinkGraph` stored in a `slotmap`: nodes keyed by path, weighted edges, stable ids. |
@@ -51,6 +51,11 @@ dispatches them once per frame.
 | `history.rs` | File-recovery snapshots: records a note's previous contents on save into `<vault>/.weft/history/<note>/<ms>.md`, deduplicates unchanged content, and prunes to a per-note retention count. |
 | `plugins.rs` | Lifecycle-only plugin registry and dispatch. |
 | `export.rs` | Standalone HTML for one document (with escaped title) and a markdown bundle for a vault. |
+| `properties.rs` | Typed property schema (`text`, `number`, `date`, `bool`, `select`, `multi-select`, `link`, `tags`), inference from frontmatter values, overrides in `vault.toml`, tolerant coercion, and conversion to/from TOML. |
+| `query.rs` | Filter (all/any, `is`, `contains`, `before`, `after`, `empty`), multi-key sort, group-by; `parse_simple_filter` for search bar syntax. |
+| `views.rs` | Saved view definitions (`View`, `ViewRegistry`) persisted to `.weft/views.toml`; columns, filter, sort, group-by, layout. |
+| `crash_recovery.rs` | Periodic dump of dirty buffers to `.weft/crash_recovery/`; scan and restore dialog on launch. |
+| `lists.rs` | Smart-list editing: `Enter` continues/ends bullets/numbers/tasks; `Tab`/`Shift+Tab` indents/outdents; pure char-offset functions with 20 tests. |
 
 ### Frontmatter
 

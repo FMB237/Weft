@@ -4,6 +4,7 @@
 // position, layout), theme, panels, and wiring between the GUI and
 //! weft-core.
 
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 use weft_core::export::{export_document, export_vault_bundle};
@@ -16,6 +17,8 @@ use weft_core::index::SearchIndex;
 use weft_core::layout_store::LayoutStore;
 use weft_core::nav::{NavEntry, NavHistory};
 
+use weft_core::crash_recovery::CrashRecovery;
+use weft_core::outline::outline;
 use weft_core::vault::Vault;
 use weft_core::watcher::{WatchEvent, WatchHandle};
 use weft_core::workspace::{MAX_PANES, Pane, SplitAxis, Workspace};
@@ -49,6 +52,10 @@ pub struct AppState {
     pub active_panel: PanelId,
     /// Editor/preview split ratio (0.0 = all editor, 1.0 = all preview).
     pub editor_split_ratio: f32,
+    /// Recently opened notes (vault-relative paths, most recent first).
+    pub recent_notes: Vec<PathBuf>,
+    /// Pinned notes (vault-relative paths).
+    pub pinned_notes: Vec<PathBuf>,
 }
 
 impl Default for AppState {
@@ -59,6 +66,8 @@ impl Default for AppState {
             window_rect: None,
             active_panel: PanelId::default(),
             editor_split_ratio: 0.5,
+            recent_notes: Vec::new(),
+            pinned_notes: Vec::new(),
         }
     }
 }
@@ -141,6 +150,8 @@ pub struct EditorApp {
     pub(crate) panels: Panels,
     /// Last save timestamp for auto-save.
     last_auto_save: std::time::Instant,
+    /// Last save timestamp for crash recovery (more frequent than auto-save).
+    last_crash_recovery_save: std::time::Instant,
 
     /// Open export dialog modal state, if any.
     export_state: Option<ExportState>,
@@ -178,6 +189,10 @@ pub struct EditorApp {
     focus_editor: bool,
     /// Whether the outline panel is shown.
     outline_open: bool,
+    /// Whether the properties panel is shown.
+    properties_open: bool,
+    /// Whether the views panel is shown.
+    views_open: bool,
     /// Pane whose editor should take keyboard focus next frame.
     pending_focus: Option<usize>,
     /// Whether the quick switcher is open.
@@ -186,6 +201,8 @@ pub struct EditorApp {
     quick_input: String,
     /// Notes to search, open tabs first.
     quick_pool: Vec<PathBuf>,
+    /// Alias map for quick switcher (alias -> path).
+    quick_alias_map: HashMap<String, PathBuf>,
     /// Ranked match for the current query.
     quick_results: Vec<Ranked>,
     /// Highlighted result.
@@ -194,6 +211,8 @@ pub struct EditorApp {
     pub(crate) command_palette_open: bool,
     /// Command palette input.
     pub(crate) command_palette_input: String,
+    /// Recently used command IDs for recent-first ordering.
+    command_palette_recent: Vec<String>,
     /// Action waiting on the user to resolve unsaved changes.
     pending_action: Option<PendingAction>,
     /// Last title sent to the window manager, to avoid redundant commands.
@@ -214,6 +233,11 @@ pub struct EditorApp {
     recovery_selected: Option<usize>,
     /// Contents of the selected snapshot, shown as a preview.
     recovery_preview: String,
+    /// Whether the recovery dialog is showing crash-recovery data (unsaved buffers)
+    /// instead of history snapshots (previous saved versions).
+    recovery_is_crash: bool,
+    /// Crash recovery manager for unsaved buffers.
+    crash_recovery: Option<CrashRecovery>,
     /// Whether the search panel is visible.
     search_open: bool,
     /// Notice shown when a file changed on disk while the buffer was dirty.
@@ -222,6 +246,10 @@ pub struct EditorApp {
     notice: Option<String>,
     /// Whether the currently applied style is dark, for system-theme tracking.
     theme_is_dark: bool,
+    /// Recently opened notes (vault-relative paths, most recent first).
+    recent_notes: Vec<PathBuf>,
+    /// Pinned notes (vault-relative paths).
+    pinned_notes: Vec<PathBuf>,
 }
 
 impl std::fmt::Debug for EditorApp {
@@ -256,6 +284,7 @@ impl EditorApp {
             event_bus: EventBus::new(),
             panels,
             last_auto_save: std::time::Instant::now(),
+            last_crash_recovery_save: std::time::Instant::now(),
             export_state: None,
             settings,
             settings_open: false,
@@ -273,14 +302,18 @@ impl EditorApp {
             find_focus: false,
             focus_editor: false,
             outline_open: false,
+            properties_open: false,
+            views_open: false,
             pending_focus: None,
             quick_open: false,
             quick_input: String::new(),
             quick_pool: Vec::new(),
+            quick_alias_map: HashMap::new(),
             quick_results: Vec::new(),
             quick_selected: 0,
             command_palette_open: false,
             command_palette_input: String::new(),
+            command_palette_recent: Vec::new(),
             pending_action: None,
             last_window_title: String::new(),
             search_index: None,
@@ -291,10 +324,14 @@ impl EditorApp {
             recovery_snapshots: Vec::new(),
             recovery_selected: None,
             recovery_preview: String::new(),
+            recovery_is_crash: false,
+            crash_recovery: None,
             search_open: false,
             external_change: None,
             notice: None,
             theme_is_dark,
+            recent_notes: Vec::new(),
+            pinned_notes: Vec::new(),
         };
 
         // Re-open the last vault and its workspace, if they still exist. The
@@ -318,6 +355,7 @@ impl EditorApp {
                 self.state.vault_path = Some(path.to_path_buf());
                 self.history = Some(HistoryStore::new(path));
                 self.vault = Some(vault);
+                self.crash_recovery = CrashRecovery::new(path).ok();
                 self.layout_store = self
                     .layout_path()
                     .and_then(|p| LayoutStore::load_from_file(&p).ok())
@@ -360,6 +398,10 @@ impl EditorApp {
         self.workspace = workspace;
         self.sync_panes();
 
+        // Restore recent and pinned notes from persisted state.
+        self.recent_notes = self.state.recent_notes.clone();
+        self.pinned_notes = self.state.pinned_notes.clone();
+
         // Sessions written before tabs existed have only `open_document`.
         if self.workspace.is_empty()
             && let Some(doc) = self.state.open_document.clone()
@@ -369,6 +411,48 @@ impl EditorApp {
         }
         self.load_all_panes();
         self.record_nav_visit();
+
+        // Check for crash recovery files and offer to restore them.
+        self.check_crash_recovery();
+    }
+
+    /// Scan for crash recovery files and open a dialog if any are found.
+    fn check_crash_recovery(&mut self) {
+        let Some(recovery) = &self.crash_recovery else {
+            return;
+        };
+        match recovery.scan_all() {
+            Ok(files) if !files.is_empty() => {
+                self.recovery_open = true;
+                self.recovery_is_crash = true;
+                self.recovery_snapshots = files
+                    .into_iter()
+                    .map(|(path, data)| Snapshot {
+                        note: path,
+                        timestamp_ms: i64::try_from(data.timestamp)
+                            .unwrap_or(i64::MAX)
+                            .saturating_mul(1000),
+                        path: data.note_path,
+                    })
+                    .collect();
+                self.recovery_snapshots
+                    .sort_by_key(|b| std::cmp::Reverse(b.timestamp_ms));
+                self.recovery_selected = Some(0);
+                self.recovery_preview = self
+                    .recovery_snapshots
+                    .first()
+                    .and_then(|s| {
+                        // Read the crash recovery content
+                        recovery.load(&s.path).ok().flatten()
+                    })
+                    .map(|d| d.content)
+                    .unwrap_or_default();
+            }
+            Ok(_) => {}
+            Err(e) => {
+                self.external_change = Some(format!("Failed to scan crash recovery: {e}"));
+            }
+        }
     }
 
     /// Persist panes, tabs, and view state for the current vault.
@@ -475,7 +559,10 @@ impl EditorApp {
             return;
         };
         let PaneView {
-            buffer, metrics, ..
+            buffer,
+            metrics,
+            split,
+            ..
         } = view;
         let content = std::mem::take(&mut buffer.content);
         if let Some(tab) = self
@@ -494,6 +581,8 @@ impl EditorApp {
                 tab.cursor = metrics.cursor;
                 tab.scroll = metrics.scroll;
             }
+            // Stash the view mode
+            tab.mode = split.mode;
         }
         buffer.content = content;
     }
@@ -522,19 +611,63 @@ impl EditorApp {
         if tab.scroll > 0.0 {
             buffer.scroll = Some(tab.scroll);
         }
+        // Restore the view mode
+        view.split.mode = tab.mode;
+
+        // Handle heading anchor: if the tab has a heading_anchor, find it in the content
+        // and set scroll_to to scroll to that heading
+        let heading_anchor = tab.heading_anchor.clone();
+
         if let Some(unsaved) = &tab.unsaved {
             buffer.content.clone_from(unsaved);
             buffer.dirty = true;
+            if let Some(anchor) = heading_anchor
+                && let Some(offset) = Self::find_heading_offset(&buffer.content, &anchor)
+            {
+                buffer.scroll_to = Some(offset);
+            }
             return;
         }
         let Some(vault) = &self.vault else { return };
-        match vault.read(&tab.path) {
-            Ok(content) => buffer.content = content,
-            Err(error) => {
-                self.external_change =
-                    Some(format!("Could not read {}: {error}", tab.path.display()));
-            }
+        // Check for crash recovery data first
+        let mut content = None;
+        if let Some(recovery) = &self.crash_recovery
+            && let Ok(Some(recovery_data)) = recovery.load(&tab.path)
+        {
+            content = Some(recovery_data.content);
+            buffer.dirty = true;
+            self.notice = Some(format!(
+                "Restored unsaved changes for {} from crash recovery",
+                tab.path.display()
+            ));
         }
+        // Fall back to reading from vault
+        if content.is_none() {
+            content = vault.read(&tab.path).ok();
+        }
+        if let Some(content) = content {
+            buffer.content = content;
+            if let Some(anchor) = heading_anchor
+                && let Some(offset) = Self::find_heading_offset(&buffer.content, &anchor)
+            {
+                buffer.scroll_to = Some(offset);
+            }
+        } else {
+            self.external_change = Some(format!(
+                "Could not read {}: file not found",
+                tab.path.display()
+            ));
+        }
+    }
+
+    /// Find the byte offset of a heading by its text (case-insensitive, fuzzy match).
+    fn find_heading_offset(content: &str, anchor: &str) -> Option<usize> {
+        let headings = outline(content);
+        let anchor_lower = anchor.to_lowercase();
+        headings
+            .iter()
+            .find(|h| h.text.to_lowercase().contains(&anchor_lower))
+            .map(|h| h.offset)
     }
 
     /// Stash every pane's buffer, then reload each from its active tab.
@@ -570,8 +703,17 @@ impl EditorApp {
         let cursor = self.views[pane].buffer.cursor;
         if let Some(history) = self.nav.get_mut(pane) {
             history.update_current(cursor, 0);
-            history.visit(NavEntry::at(path, cursor));
+            history.visit(NavEntry::at(path.clone(), cursor));
         }
+
+        // Track recently opened notes (most recent first, max 20).
+        self.recent_notes.retain(|p| p != &path);
+        self.recent_notes.insert(0, path);
+        if self.recent_notes.len() > 20 {
+            self.recent_notes.truncate(20);
+        }
+        // Sync to persisted state.
+        self.state.recent_notes = self.recent_notes.clone();
     }
 
     /// Step back or forward in the focused pane's history.
@@ -748,16 +890,18 @@ impl EditorApp {
     /// A plain click reuses (or opens) a tab in the pane whose preview was
     /// clicked. A modifier-click opens elsewhere: the other pane when the
     /// window is split, otherwise a new tab in the same pane, so the note
-    /// being read stays visible. Anchors (`[[Note#Heading]]`) open the note;
-    /// scrolling to the heading is not implemented yet.
+    /// being read stays visible. Anchors (`[[Note#Heading]]`) open the note
+    /// and scroll to the heading.
     fn open_wikilink(&mut self, pane: usize, link: &PreviewLink) {
-        let note = link
-            .target
-            .split('#')
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        // Extract note name and heading anchor from the target (e.g., "Note#Heading")
+        let parts: Vec<&str> = link.target.split('#').collect();
+        let note = parts[0].trim().to_string();
+        let heading_anchor = if parts.len() > 1 && !parts[1].trim().is_empty() {
+            Some(parts[1].trim().to_string())
+        } else {
+            None
+        };
+
         if note.is_empty() {
             return;
         }
@@ -775,29 +919,35 @@ impl EditorApp {
         else {
             return;
         };
-        let Some(resolved) = resolve_link(&source, &note, &files) else {
+        let alias_map = self.vault.as_ref().and_then(|v| v.build_alias_index().ok());
+        let Some(resolved) = resolve_link(&source, &note, &files, alias_map.as_ref()) else {
             self.notice = Some(format!("No note matches [[{}]].", link.target));
             return;
         };
         let event_path = self.vault.as_ref().map(|vault| vault.resolve(&resolved));
 
         self.stash_pane(pane);
+        #[expect(
+            clippy::redundant_clone,
+            reason = "Option<String> clone is intentional for multi-branch use"
+        )]
+        let heading = heading_anchor.clone();
         if link.new_tab && self.workspace.panes.len() > 1 {
             let other = (0..self.workspace.panes.len())
                 .find(|candidate| *candidate != pane)
                 .unwrap_or(pane);
-            self.workspace.open_in(other, resolved);
+            self.workspace.open_in(other, resolved, heading);
             self.sync_panes();
             self.load_all_panes();
             self.pending_focus = Some(self.pane_index());
         } else if link.new_tab {
             self.workspace.focused = pane;
-            self.workspace.open_new(resolved);
+            self.workspace.open_new(resolved, heading);
             self.sync_panes();
             self.load_pane(pane);
             self.pending_focus = Some(self.pane_index());
         } else {
-            self.workspace.open_in(pane, resolved);
+            self.workspace.open_in(pane, resolved, heading);
             self.sync_panes();
             self.load_pane(pane);
         }
@@ -852,6 +1002,10 @@ impl EditorApp {
             self.buffer_mut().dirty = false;
             if let Some(tab) = self.workspace.active_tab_mut() {
                 tab.unsaved = None;
+            }
+            // Clear crash recovery since we've successfully saved
+            if let Some(recovery) = &self.crash_recovery {
+                let _ = recovery.clear(&path);
             }
             self.last_auto_save = std::time::Instant::now();
             if let Some(index) = &mut self.search_index {
@@ -916,6 +1070,26 @@ impl EditorApp {
         self.last_auto_save = std::time::Instant::now();
     }
 
+    /// Save all dirty buffers to crash recovery if enough time has passed.
+    /// Uses a shorter interval (30 seconds) than auto-save to minimize data loss.
+    fn maybe_crash_recovery_save(&mut self) {
+        const CRASH_RECOVERY_INTERVAL_SECS: u64 = 30;
+        if self.last_crash_recovery_save.elapsed().as_secs() < CRASH_RECOVERY_INTERVAL_SECS {
+            return;
+        }
+        let Some(recovery) = &self.crash_recovery else {
+            return;
+        };
+        for pane_view in &self.views {
+            if pane_view.buffer.dirty
+                && let Some(path) = &pane_view.buffer.document
+            {
+                let _ = recovery.save(path, &pane_view.buffer.content);
+            }
+        }
+        self.last_crash_recovery_save = std::time::Instant::now();
+    }
+
     /// Render one pane: the tab strip, the find bar when it owns focus, and
     /// the editor split.
     ///
@@ -951,8 +1125,15 @@ impl EditorApp {
             metrics,
             rendered,
         } = &mut self.views[pane];
-        let (measured, link) =
-            split.show(pane, ui, buffer, ctx, self.settings.font_size, &breadcrumbs);
+        let (measured, link) = split.show(
+            pane,
+            ui,
+            buffer,
+            ctx,
+            self.settings.font_size,
+            &breadcrumbs,
+            self.vault.as_ref(),
+        );
         *metrics = Some(measured);
         rendered.clone_from(&buffer.document);
         let clicked = !ui.memory(egui::Memory::any_popup_open)
@@ -1089,6 +1270,16 @@ impl EditorApp {
                 Event::ThemeChanged => {
                     self.settings.theme.apply(ctx);
                     self.theme_is_dark = self.settings.theme.is_dark(ctx);
+                }
+                Event::PinNote(path) => {
+                    if !self.pinned_notes.contains(&path) {
+                        self.pinned_notes.push(path);
+                        self.state.pinned_notes = self.pinned_notes.clone();
+                    }
+                }
+                Event::UnpinNote(path) => {
+                    self.pinned_notes.retain(|p| p != &path);
+                    self.state.pinned_notes = self.pinned_notes.clone();
                 }
             }
         }
@@ -1448,6 +1639,21 @@ impl EditorApp {
             }
             TabStripAction::MoveToOtherPane(index) => self.move_tab_to_other_pane(pane, index),
             TabStripAction::Close(index) => self.request_close_tab(pane, index),
+            TabStripAction::SetMode(index, mode) => {
+                if let Some(tab) = self
+                    .workspace
+                    .panes
+                    .get_mut(pane)
+                    .and_then(|p| p.tabs.get_mut(index))
+                {
+                    tab.mode = mode;
+                    if index == self.workspace.panes[pane].active
+                        && let Some(view) = self.views.get_mut(pane)
+                    {
+                        view.split.mode = mode;
+                    }
+                }
+            }
         }
     }
 
@@ -1573,6 +1779,7 @@ impl EditorApp {
                 self.recovery_selected = (!snapshots.is_empty()).then_some(0);
                 self.recovery_snapshots = snapshots;
                 self.recovery_preview = preview;
+                self.recovery_is_crash = false;
                 self.recovery_open = true;
             }
             Err(error) => {
@@ -1589,22 +1796,39 @@ impl EditorApp {
         let Some(snapshot) = self.recovery_snapshots.get(index).cloned() else {
             return;
         };
-        let Some(content) = self
-            .history
-            .as_ref()
-            .and_then(|history| history.read(&snapshot).ok())
-        else {
+        let content = if self.recovery_is_crash {
+            // For crash recovery, content is already in the preview or we load it
+            let Some(recovery) = &self.crash_recovery else {
+                self.external_change = Some("Crash recovery manager not available.".to_string());
+                return;
+            };
+            recovery
+                .load(&snapshot.path)
+                .ok()
+                .flatten()
+                .map(|d| d.content)
+        } else {
+            self.history
+                .as_ref()
+                .and_then(|history| history.read(&snapshot).ok())
+        };
+        let Some(content) = content else {
             self.external_change = Some("Could not read the selected snapshot.".to_string());
             return;
         };
         self.buffer_mut().content = content;
         self.buffer_mut().dirty = true;
         self.last_auto_save = std::time::Instant::now();
+        let source = if self.recovery_is_crash {
+            "crash recovery"
+        } else {
+            &snapshot.label()
+        };
         self.external_change = Some(format!(
-            "Restored the {} snapshot into the editor; save to keep it.",
-            snapshot.label()
+            "Restored the {source} into the editor; save to keep it."
         ));
         self.recovery_open = false;
+        self.recovery_is_crash = false;
     }
 
     /// Render the file-recovery dialog.
@@ -1654,11 +1878,22 @@ impl EditorApp {
                                     let selected = self.recovery_selected == Some(index);
                                     if ui.selectable_label(selected, snapshot.label()).clicked() {
                                         self.recovery_selected = Some(index);
-                                        self.recovery_preview = self
-                                            .history
-                                            .as_ref()
-                                            .and_then(|history| history.read(snapshot).ok())
-                                            .unwrap_or_default();
+                                        self.recovery_preview = if self.recovery_is_crash {
+                                            match &self.crash_recovery {
+                                                Some(recovery) => recovery
+                                                    .load(&snapshot.path)
+                                                    .ok()
+                                                    .flatten()
+                                                    .map(|d| d.content)
+                                                    .unwrap_or_default(),
+                                                None => String::new(),
+                                            }
+                                        } else {
+                                            self.history
+                                                .as_ref()
+                                                .and_then(|history| history.read(snapshot).ok())
+                                                .unwrap_or_default()
+                                        };
                                     }
                                 }
                             });
@@ -2084,6 +2319,10 @@ impl EditorApp {
                 }
             }
         }
+        // Build alias map
+        if let Ok(alias_map) = vault.build_alias_index() {
+            self.quick_alias_map = alias_map;
+        }
         self.quick_pool = pool;
         self.quick_input.clear();
         self.quick_selected = 0;
@@ -2094,7 +2333,8 @@ impl EditorApp {
     /// Recompute the ranked results for the current query.
     fn refresh_quick_results(&mut self) {
         const LIMIT: usize = 60;
-        if self.quick_input.trim().is_empty() {
+        let query = self.quick_input.trim();
+        if query.is_empty() {
             self.quick_results = self
                 .quick_pool
                 .iter()
@@ -2105,11 +2345,33 @@ impl EditorApp {
                 })
                 .collect();
         } else {
-            self.quick_results = fuzzy::rank(
-                self.quick_input.trim(),
-                self.quick_pool.iter().map(PathBuf::as_path),
-                LIMIT,
-            );
+            // Rank files by fuzzy match
+            let mut results =
+                fuzzy::rank(query, self.quick_pool.iter().map(PathBuf::as_path), LIMIT);
+
+            // Also check aliases
+            let query_lower = query.to_lowercase();
+            for (alias, path) in &self.quick_alias_map {
+                if alias.contains(&query_lower) {
+                    // Check if this path is already in results
+                    if !results.iter().any(|r| r.path == *path) {
+                        results.push(Ranked {
+                            path: path.clone(),
+                            score: 1000, // High score for alias matches
+                        });
+                    }
+                }
+            }
+
+            // Re-sort by score
+            results.sort_by(|left, right| {
+                right
+                    .score
+                    .cmp(&left.score)
+                    .then_with(|| left.path.cmp(&right.path))
+            });
+            results.truncate(LIMIT);
+            self.quick_results = results;
         }
         self.quick_selected = self
             .quick_selected
@@ -2208,51 +2470,407 @@ impl EditorApp {
     }
 
     fn render_command_palette(&mut self, ctx: &egui::Context) {
-        let width = 500.0;
-        let height = 300.0;
+        // Command definition for the palette
+        struct Command {
+            id: &'static str,
+            label: &'static str,
+            category: &'static str,
+            shortcut: Option<&'static str>,
+            context: &'static str,
+            action: fn(&mut EditorApp, &egui::Context),
+        }
+
+        let width = 600.0;
+        let height = 420.0;
         let center = ctx.available_rect().center();
         let rect = egui::Rect::from_center_size(center, egui::vec2(width, height));
 
+        let has_note = self.open_path().is_some();
+        let has_vault = self.vault.is_some();
+
+        // Build the full command registry
+        let commands = vec![
+            // File operations
+            Command {
+                id: "file.new_note",
+                label: "New Note",
+                category: "File",
+                shortcut: Some("Ctrl+N"),
+                context: "always",
+                action: |app, _| app.new_note(),
+            },
+            Command {
+                id: "file.open_vault",
+                label: "Open Vault",
+                category: "File",
+                shortcut: Some("Ctrl+Shift+O"),
+                context: "always",
+                action: |app, _| app.vault_open_dialog_open = true,
+            },
+            Command {
+                id: "file.save",
+                label: "Save Document",
+                category: "File",
+                shortcut: Some("Ctrl+S"),
+                context: "note",
+                action: |app, _| app.save_document(),
+            },
+            Command {
+                id: "file.close_note",
+                label: "Close Note",
+                category: "File",
+                shortcut: Some("Ctrl+W"),
+                context: "note",
+                action: |app, _| app.request_close_document(),
+            },
+            Command {
+                id: "file.reopen_closed",
+                label: "Reopen Closed Note",
+                category: "File",
+                shortcut: Some("Ctrl+Shift+T"),
+                context: "always",
+                action: |app, _| {
+                    if app.workspace.reopen_closed().is_some() {
+                        app.load_active_tab();
+                    }
+                },
+            },
+            Command {
+                id: "file.export_document",
+                label: "Export Document as HTML",
+                category: "File",
+                shortcut: Some("Ctrl+Shift+P"),
+                context: "note",
+                action: |app, _| {
+                    if let Some(doc) = app.open_path() {
+                        app.export_state = Some(ExportState::Document {
+                            doc_path: doc.to_path_buf(),
+                            output: String::new(),
+                        });
+                    }
+                },
+            },
+            Command {
+                id: "file.export_vault",
+                label: "Export Vault Bundle",
+                category: "File",
+                shortcut: Some("Ctrl+Shift+B"),
+                context: "vault",
+                action: |app, _| {
+                    app.export_state = Some(ExportState::Vault {
+                        output: String::new(),
+                    });
+                },
+            },
+            Command {
+                id: "file.recovery",
+                label: "File Recovery",
+                category: "File",
+                shortcut: None,
+                context: "note",
+                action: |app, _| app.open_recovery_dialog(),
+            },
+            Command {
+                id: "file.preferences",
+                label: "Preferences",
+                category: "File",
+                shortcut: None,
+                context: "always",
+                action: |app, _| app.settings_open = true,
+            },
+            // Edit operations
+            Command {
+                id: "edit.find",
+                label: "Find in Note",
+                category: "Edit",
+                shortcut: Some("Ctrl+F"),
+                context: "note",
+                action: |app, _| app.open_find_bar(),
+            },
+            Command {
+                id: "edit.find_vault",
+                label: "Search Vault",
+                category: "Edit",
+                shortcut: Some("Ctrl+Shift+F"),
+                context: "vault",
+                action: |app, _| {
+                    app.search_open = true;
+                    app.panels.search.focus();
+                },
+            },
+            Command {
+                id: "edit.command_palette",
+                label: "Command Palette",
+                category: "Edit",
+                shortcut: Some("Ctrl+P"),
+                context: "always",
+                action: |app, _| {
+                    app.command_palette_open = !app.command_palette_open;
+                    app.command_palette_input.clear();
+                },
+            },
+            // Navigation
+            Command {
+                id: "nav.quick_switch",
+                label: "Quick Switch",
+                category: "Navigation",
+                shortcut: Some("Ctrl+O"),
+                context: "vault",
+                action: |app, _| app.open_quick_switcher(),
+            },
+            Command {
+                id: "nav.back",
+                label: "Back",
+                category: "Navigation",
+                shortcut: Some("Alt+Left"),
+                context: "always",
+                action: |app, _| app.navigate(false),
+            },
+            Command {
+                id: "nav.forward",
+                label: "Forward",
+                category: "Navigation",
+                shortcut: Some("Alt+Right"),
+                context: "always",
+                action: |app, _| app.navigate(true),
+            },
+            Command {
+                id: "nav.next_tab",
+                label: "Next Tab",
+                category: "Navigation",
+                shortcut: Some("Ctrl+Tab"),
+                context: "always",
+                action: |app, _| app.cycle_tab(1),
+            },
+            Command {
+                id: "nav.prev_tab",
+                label: "Previous Tab",
+                category: "Navigation",
+                shortcut: Some("Ctrl+Shift+Tab"),
+                context: "always",
+                action: |app, _| app.cycle_tab(-1),
+            },
+            // View
+            Command {
+                id: "view.toggle_graph",
+                label: "Toggle Graph",
+                category: "View",
+                shortcut: Some("Ctrl+G"),
+                context: "always",
+                action: |app, _| {
+                    app.panels.active = match app.panels.active {
+                        PanelId::Graph => PanelId::EditorSplit,
+                        _ => PanelId::Graph,
+                    };
+                },
+            },
+            Command {
+                id: "view.toggle_outline",
+                label: "Toggle Outline",
+                category: "View",
+                shortcut: None,
+                context: "note",
+                action: |app, _| app.outline_open = !app.outline_open,
+            },
+            Command {
+                id: "view.toggle_properties",
+                label: "Toggle Properties Panel",
+                category: "View",
+                shortcut: None,
+                context: "note",
+                action: |app, _| app.properties_open = !app.properties_open,
+            },
+            Command {
+                id: "view.toggle_views",
+                label: "Toggle Views Panel",
+                category: "View",
+                shortcut: None,
+                context: "vault",
+                action: |app, _| app.views_open = !app.views_open,
+            },
+            Command {
+                id: "view.split_right",
+                label: "Split Right",
+                category: "View",
+                shortcut: None,
+                context: "always",
+                action: |app, _| app.split_pane(SplitAxis::Vertical),
+            },
+            Command {
+                id: "view.split_down",
+                label: "Split Down",
+                category: "View",
+                shortcut: None,
+                context: "always",
+                action: |app, _| app.split_pane(SplitAxis::Horizontal),
+            },
+            Command {
+                id: "view.merge_pane",
+                label: "Close Pane",
+                category: "View",
+                shortcut: None,
+                context: "always",
+                action: |app, _| app.merge_pane(),
+            },
+            // Tools
+            Command {
+                id: "tools.daily_note",
+                label: "Open Daily Note",
+                category: "Tools",
+                shortcut: Some("Ctrl+Shift+D"),
+                context: "vault",
+                action: |_app, _| {
+                    // TODO: M6 daily note
+                },
+            },
+            Command {
+                id: "tools.new_from_template",
+                label: "New from Template",
+                category: "Tools",
+                shortcut: None,
+                context: "vault",
+                action: |_app, _| {
+                    // TODO: M6 templates
+                },
+            },
+        ];
+
         egui::Window::new("Command Palette")
             .collapsible(false)
-            .resizable(false)
+            .resizable(true)
             .title_bar(false)
             .current_pos(rect.min)
+            .default_width(width)
+            .max_height(500.0)
             .show(ctx, |ui| {
-                ui.heading("Command Palette");
-                ui.separator();
-                ui.text_edit_singleline(&mut self.command_palette_input);
-                ui.separator();
-
-                ui.label("Commands:");
-                ui.label("  Ctrl+S - Save document");
-                ui.label("  Ctrl+O - Quick switch");
-                ui.label("  Ctrl+Shift+O - Open vault");
-                ui.label("  Ctrl+N - New note");
-                ui.label("  Ctrl+F - Find in note");
-                ui.label("  Ctrl+Shift+F - Search vault");
-                ui.label("  Ctrl+P - Command palette");
-                ui.label("  Ctrl+G - Toggle graph");
-                ui.label("  Ctrl+W - Close note");
-                ui.label("  Ctrl+Tab - Next note");
-                ui.label("  Ctrl+Shift+P - Export document");
-                ui.label("  Ctrl+Shift+B - Export vault bundle");
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.command_palette_input)
+                        .hint_text("Type a command...")
+                        .desired_width(f32::INFINITY),
+                );
+                if !response.has_focus() {
+                    response.request_focus();
+                }
 
                 ui.separator();
-                ui.horizontal(|ui| {
-                    if ui.button("Close").clicked() {
-                        self.command_palette_open = false;
+
+                let query = self.command_palette_input.trim().to_lowercase();
+
+                // Score a command against the query (fuzzy match on label and id)
+                let score_command = |query: &str, cmd: &Command| -> Option<i32> {
+                    if query.is_empty() {
+                        return Some(0);
                     }
-                    if ui.button("Export Document").clicked() {
-                        if let Some(doc) = self.open_path() {
-                            self.export_state = Some(ExportState::Document {
-                                doc_path: doc.to_path_buf(),
-                                output: String::new(),
-                            });
+                    let label = cmd.label.to_lowercase();
+                    let id = cmd.id.to_lowercase();
+                    let cat = cmd.category.to_lowercase();
+
+                    // Exact prefix match on label
+                    if label.starts_with(query) {
+                        return Some(1000);
+                    }
+                    // Exact prefix match on id
+                    if id.starts_with(query) {
+                        return Some(900);
+                    }
+                    // Fuzzy match on label
+                    if let Some(score) = weft_core::fuzzy::score(query, &label) {
+                        return Some(score + 100);
+                    }
+                    // Fuzzy match on id
+                    if let Some(score) = weft_core::fuzzy::score(query, &id) {
+                        return Some(score + 50);
+                    }
+                    // Category match
+                    if cat.contains(query) {
+                        return Some(10);
+                    }
+                    None
+                };
+
+                // Score and filter commands
+                let mut scored: Vec<(&Command, i32)> = commands
+                    .iter()
+                    .filter(|cmd| {
+                        // Context filtering
+                        match cmd.context {
+                            "note" => has_note,
+                            "vault" | "graph" | "view" => has_vault,
+                            _ => true,
                         }
-                        self.command_palette_open = false;
+                    })
+                    .filter_map(|cmd| score_command(&query, cmd).map(|score| (cmd, score)))
+                    .collect();
+
+                // Sort: recent first, then by score
+                scored.sort_by(|(a, score_a), (b, score_b)| {
+                    let recent_a = self.command_palette_recent.iter().position(|id| id == a.id);
+                    let recent_b = self.command_palette_recent.iter().position(|id| id == b.id);
+                    match (recent_a, recent_b) {
+                        (Some(ra), Some(rb)) => ra.cmp(&rb).then(score_b.cmp(score_a)),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => score_b.cmp(score_a).then_with(|| a.label.cmp(b.label)),
                     }
                 });
+
+                if scored.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No commands match.")
+                            .color(palette(ui.ctx()).text_muted),
+                    );
+                } else {
+                    // Group by category
+                    let mut current_category = "";
+                    egui::ScrollArea::vertical()
+                        .id_salt("command_palette_results")
+                        .max_height(380.0)
+                        .show(ui, |ui| {
+                            for (cmd, _score) in scored {
+                                if cmd.category != current_category {
+                                    current_category = cmd.category;
+                                    ui.separator();
+                                    ui.label(
+                                        egui::RichText::new(current_category)
+                                            .strong()
+                                            .color(palette(ui.ctx()).accent),
+                                    );
+                                }
+                                let is_selected = false; // We don't track selection with keyboard yet
+                                let resp = ui.horizontal(|ui| {
+                                    let _ = ui.selectable_label(is_selected, cmd.label);
+                                    if let Some(shortcut) = cmd.shortcut {
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(shortcut)
+                                                        .small()
+                                                        .color(palette(ui.ctx()).text_muted),
+                                                );
+                                            },
+                                        );
+                                    }
+                                });
+                                if resp.response.clicked() {
+                                    (cmd.action)(self, ctx);
+                                    // Track recent
+                                    if !self.command_palette_recent.iter().any(|id| id == cmd.id) {
+                                        self.command_palette_recent.insert(0, cmd.id.to_string());
+                                        if self.command_palette_recent.len() > 20 {
+                                            self.command_palette_recent.truncate(20);
+                                        }
+                                    }
+                                    self.command_palette_open = false;
+                                }
+                            }
+                        });
+                }
+
+                // Close on Escape
+                if ctx.input(|i| i.key_pressed(Key::Escape)) {
+                    self.command_palette_open = false;
+                }
             });
     }
 }
@@ -2299,6 +2917,9 @@ impl eframe::App for EditorApp {
 
         // Auto-save check.
         self.maybe_auto_save();
+
+        // Crash recovery save check (more frequent than auto-save).
+        self.maybe_crash_recovery_save();
 
         // Apply filesystem changes detected in the background.
         self.poll_watcher();
@@ -2393,6 +3014,17 @@ impl eframe::App for EditorApp {
                     ui.separator();
                     if ui.selectable_label(self.outline_open, "Outline").clicked() {
                         self.outline_open = !self.outline_open;
+                        ui.close_menu();
+                    }
+                    if ui
+                        .selectable_label(self.properties_open, "Properties")
+                        .clicked()
+                    {
+                        self.properties_open = !self.properties_open;
+                        ui.close_menu();
+                    }
+                    if ui.selectable_label(self.views_open, "Views").clicked() {
+                        self.views_open = !self.views_open;
                         ui.close_menu();
                     }
                     ui.separator();
@@ -2615,6 +3247,8 @@ impl eframe::App for EditorApp {
                 open_path.as_deref(),
                 open_dirty,
                 &mut self.event_bus,
+                &self.recent_notes,
+                &self.pinned_notes,
             );
         });
 
@@ -2639,6 +3273,55 @@ impl eframe::App for EditorApp {
                 self.focus_editor = true;
                 ctx.request_repaint();
             }
+        }
+
+        // Right side panel: properties panel for the open note. It edits the
+        // live buffer text and hands it back, so the panel never writes to
+        // disk behind unsaved editor content.
+        if self.properties_open {
+            let schema = self
+                .vault
+                .as_ref()
+                .map(|vault| vault.property_schema().clone())
+                .unwrap_or_default();
+            let text = self
+                .buffer()
+                .document
+                .as_ref()
+                .map(|_| self.buffer().content.clone());
+            let mut edited = None;
+            SidePanel::right("properties")
+                .resizable(true)
+                .default_width(280.0)
+                .width_range(220.0..=450.0)
+                .show(ctx, |ui| {
+                    if let Some(text) = &text {
+                        edited = self.panels.properties.show(ui, &schema, text);
+                    } else {
+                        ui.weak("No note open");
+                    }
+                });
+            if let Some(new_text) = edited {
+                let buffer = self.buffer_mut();
+                buffer.content = new_text;
+                buffer.dirty = true;
+                buffer.cursor = None;
+            }
+        }
+
+        // Right side panel: views panel.
+        if self.views_open {
+            let vault = self.vault.as_mut().expect("vault must be open");
+            SidePanel::right("views")
+                .resizable(true)
+                .default_width(320.0)
+                .width_range(250.0..=600.0)
+                .show(ctx, |ui| {
+                    self.panels.views.show(ui, vault, &mut self.event_bus);
+                });
+
+            // Show save view dialog if open (needs to be outside side panel for modal)
+            self.panels.views.show_save_view_dialog(ctx, vault);
         }
 
         // Central panel: editor split or graph view depending on active panel.
@@ -2861,6 +3544,8 @@ mod tests {
             window_rect: Some([10.0, 20.0, 800.0, 600.0]),
             active_panel: PanelId::Graph,
             editor_split_ratio: 0.7,
+            recent_notes: Vec::new(),
+            pinned_notes: Vec::new(),
         };
         let json = serde_json::to_string(&state).expect("serialize app state");
         let loaded: AppState = serde_json::from_str(&json).expect("deserialize app state");

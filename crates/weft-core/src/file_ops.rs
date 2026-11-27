@@ -80,6 +80,12 @@ pub trait FileOps {
 
     /// Resolve a relative path to an absolute path within the vault.
     fn resolve(&self, path: &Path) -> std::path::PathBuf;
+
+    /// Build an index of note aliases (from frontmatter `aliases:`) to file paths.
+    /// Returns a map from alias (lowercase) to the relative file path.
+    fn build_alias_index(&self) -> Result<std::collections::HashMap<String, std::path::PathBuf>> {
+        Ok(std::collections::HashMap::new())
+    }
 }
 
 impl FileOps for crate::vault::Vault {
@@ -104,6 +110,10 @@ impl FileOps for crate::vault::Vault {
 
     fn resolve(&self, path: &Path) -> std::path::PathBuf {
         self.resolve(path)
+    }
+
+    fn build_alias_index(&self) -> Result<std::collections::HashMap<String, std::path::PathBuf>> {
+        self.build_alias_index()
     }
 }
 

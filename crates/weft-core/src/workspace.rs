@@ -74,6 +74,9 @@ pub struct Tab {
     pub cursor: Option<usize>,
     /// Vertical scroll offset, restored when the tab is activated.
     pub scroll: f32,
+    /// Heading anchor to scroll to when opening this tab (e.g., "Heading" from [[Note#Heading]]).
+    #[serde(skip)]
+    pub heading_anchor: Option<String>,
     /// Buffer edited in memory but not yet written to disk.
     ///
     /// Not persisted: a restored session reads the file, and crash recovery
@@ -284,7 +287,7 @@ impl Workspace {
             return index;
         }
         let pane_index = self.focused.min(self.panes.len().saturating_sub(1));
-        self.open_in(pane_index, path)
+        self.open_in(pane_index, path, None)
     }
 
     /// Locate an open tab by path, returning its pane and index.
@@ -299,7 +302,13 @@ impl Workspace {
 
     /// Show `path` in a specific pane, reusing a tab in that pane when it is
     /// already open there and appending one otherwise.
-    pub fn open_in(&mut self, pane_index: usize, path: impl Into<PathBuf>) -> usize {
+    /// Optionally set a heading anchor to scroll to when the tab is activated.
+    pub fn open_in(
+        &mut self,
+        pane_index: usize,
+        path: impl Into<PathBuf>,
+        heading_anchor: Option<String>,
+    ) -> usize {
         let path = path.into();
         if self.panes.is_empty() {
             self.panes.push(Pane::new());
@@ -309,15 +318,23 @@ impl Workspace {
         let pane = &mut self.panes[pane_index];
         if let Some(index) = pane.tabs.iter().position(|tab| tab.path == path) {
             pane.activate(index);
+            if let (Some(anchor), Some(tab)) = (heading_anchor, pane.tabs.get_mut(index)) {
+                tab.heading_anchor = Some(anchor);
+            }
             return index;
         }
-        pane.push(Tab::new(path))
+        let mut tab = Tab::new(path);
+        tab.heading_anchor = heading_anchor;
+        pane.push(tab)
     }
 
     /// Show `path` in the focused pane in a new tab, even when it is open.
-    pub fn open_new(&mut self, path: impl Into<PathBuf>) -> usize {
+    /// Optionally set a heading anchor to scroll to when the tab is activated.
+    pub fn open_new(&mut self, path: impl Into<PathBuf>, heading_anchor: Option<String>) -> usize {
         let pane = self.focused_pane_mut();
-        pane.push(Tab::new(path))
+        let mut tab = Tab::new(path);
+        tab.heading_anchor = heading_anchor;
+        pane.push(tab)
     }
 
     /// Make the tab at `index` visible in the focused pane.
@@ -676,7 +693,7 @@ mod tests {
     #[test]
     fn opening_a_note_again_in_a_new_tab_is_allowed() {
         let mut workspace = ws(&["a.md"]);
-        workspace.open_new("a.md");
+        workspace.open_new("a.md", None);
         assert_eq!(workspace.tab_count(), 2);
     }
 

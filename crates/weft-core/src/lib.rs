@@ -4,6 +4,7 @@
 )]
 
 pub mod clustering;
+pub mod crash_recovery;
 pub mod document;
 pub mod export;
 pub mod file_ops;
@@ -16,11 +17,15 @@ pub mod history;
 pub mod index;
 pub mod layout;
 pub mod layout_store;
+pub mod lists;
 pub mod nav;
 pub mod outline;
 pub mod parser;
 pub mod plugins;
+pub mod properties;
+pub mod query;
 pub mod trash;
 pub mod vault;
+pub mod views;
 pub mod watcher;
 pub mod workspace;

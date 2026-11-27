@@ -13,6 +13,8 @@ pub struct Frontmatter {
     pub created: Option<String>,
     #[serde(default)]
     pub modified: Option<String>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
     /// Any additional keys not covered by the typed fields above.
     #[serde(default, flatten)]
     pub other: HashMap<String, toml::Value>,
@@ -41,6 +43,18 @@ impl Frontmatter {
             table.insert(
                 "tags".into(),
                 toml::Value::Array(self.tags.iter().cloned().map(toml::Value::String).collect()),
+            );
+        }
+        if !self.aliases.is_empty() {
+            table.insert(
+                "aliases".into(),
+                toml::Value::Array(
+                    self.aliases
+                        .iter()
+                        .cloned()
+                        .map(toml::Value::String)
+                        .collect(),
+                ),
             );
         }
         if let Some(created) = &self.created {

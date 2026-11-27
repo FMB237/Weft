@@ -1,4 +1,9 @@
+use crate::graph_updater::AliasMap;
+use crate::parser;
+use crate::properties::PropertySchema;
+use crate::views::ViewRegistry;
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// A vault is a directory of markdown files with associated config.
@@ -6,12 +11,19 @@ use std::path::{Path, PathBuf};
 pub struct Vault {
     pub root: PathBuf,
     pub config: VaultConfig,
+    /// Property schema (loaded from vault.toml and inferred from notes).
+    property_schema: PropertySchema,
+    /// View registry (loaded from .weft/views.toml).
+    view_registry: ViewRegistry,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VaultConfig {
     pub name: String,
     pub extensions: Vec<String>,
+    /// Property definitions from vault.toml [properties] section.
+    #[serde(default)]
+    pub properties: PropertySchema,
 }
 
 impl Default for VaultConfig {
@@ -19,6 +31,7 @@ impl Default for VaultConfig {
         Self {
             name: "default".into(),
             extensions: vec!["md".into(), "markdown".into()],
+            properties: PropertySchema::default(),
         }
     }
 }
@@ -38,7 +51,18 @@ impl Vault {
             VaultConfig::default()
         };
 
-        Ok(Self { root, config })
+        // Load property schema from config
+        let property_schema = config.properties.clone();
+
+        // Load view registry from .weft/views.toml
+        let view_registry = Self::load_view_registry(&root)?;
+
+        Ok(Self {
+            root,
+            config,
+            property_schema,
+            view_registry,
+        })
     }
 
     /// Save vault config to disk.
@@ -47,6 +71,46 @@ impl Vault {
         let config_path = self.root.join("vault.toml");
         crate::file_ops::write_atomic(&config_path, &data)?;
         Ok(())
+    }
+
+    /// Save view registry to disk.
+    pub fn save_view_registry(&self) -> Result<()> {
+        let weft_dir = self.root.join(".weft");
+        std::fs::create_dir_all(&weft_dir)?;
+        let views_path = weft_dir.join("views.toml");
+        let data = toml::to_string_pretty(&self.view_registry)?;
+        crate::file_ops::write_atomic(&views_path, &data)?;
+        Ok(())
+    }
+
+    fn load_view_registry(root: &Path) -> Result<ViewRegistry> {
+        let views_path = root.join(".weft").join("views.toml");
+        if views_path.exists() {
+            let data = std::fs::read_to_string(&views_path)?;
+            Ok(toml::from_str(&data).context("parse views registry")?)
+        } else {
+            Ok(ViewRegistry::new())
+        }
+    }
+
+    /// Get the property schema for this vault.
+    pub fn property_schema(&self) -> &PropertySchema {
+        &self.property_schema
+    }
+
+    /// Get the view registry for this vault.
+    pub fn view_registry(&self) -> &ViewRegistry {
+        &self.view_registry
+    }
+
+    /// Get a mutable reference to the view registry.
+    pub fn view_registry_mut(&mut self) -> &mut ViewRegistry {
+        &mut self.view_registry
+    }
+
+    /// Get a mutable reference to the property schema.
+    pub fn property_schema_mut(&mut self) -> &mut PropertySchema {
+        &mut self.property_schema
     }
 
     /// List all markdown files in the vault recursively, relative to the vault root.
@@ -125,6 +189,22 @@ impl Vault {
         }
         std::fs::rename(&from_full, &to_full)
             .with_context(|| format!("rename {} to {}", from_full.display(), to_full.display()))
+    }
+
+    /// Build an index of note aliases (from frontmatter `aliases:`) to file paths.
+    /// Returns a map from alias (lowercase) to the relative file path.
+    pub fn build_alias_index(&self) -> Result<AliasMap> {
+        let mut alias_map = HashMap::new();
+        let files = self.list_files()?;
+        for file in files {
+            if let Ok(content) = self.read(&file) {
+                let frontmatter = parser::parse_frontmatter(&content);
+                for alias in frontmatter.aliases {
+                    alias_map.insert(alias.to_lowercase(), file.clone());
+                }
+            }
+        }
+        Ok(alias_map)
     }
 
     /// Recursively delete a directory relative to the vault root.

@@ -9,14 +9,18 @@ pub mod file_tree;
 pub mod graph;
 pub mod outline;
 pub mod preview;
+pub mod properties;
 pub mod search;
+pub mod views;
 
 use crate::panels::backlinks::BacklinksPanel;
 use crate::panels::file_tree::FileTreePanel;
 use crate::panels::graph::GraphPanel;
 use crate::panels::outline::OutlinePanel;
 use crate::panels::preview::PreviewPanel;
+use crate::panels::properties::PropertiesPanel;
 use crate::panels::search::SearchPanel;
+use crate::panels::views::ViewsPanel;
 use serde::{Deserialize, Serialize};
 
 /// Identifier for each dockable panel.
@@ -28,6 +32,8 @@ pub enum PanelId {
     Preview,
     Graph,
     Search,
+    Properties,
+    Views,
 }
 
 /// Container for all UI panels.
@@ -50,6 +56,10 @@ pub struct Panels {
     pub backlinks: BacklinksPanel,
     /// Headings of the open note.
     pub outline: OutlinePanel,
+    /// Properties panel for editing frontmatter.
+    pub properties: PropertiesPanel,
+    /// Views panel for table/cards/board views.
+    pub views: ViewsPanel,
 }
 
 impl Default for Panels {
@@ -69,6 +79,8 @@ impl Panels {
             search: SearchPanel::new(),
             backlinks: BacklinksPanel::new(),
             outline: OutlinePanel::new(),
+            properties: PropertiesPanel::new(),
+            views: ViewsPanel::new(),
         }
     }
 

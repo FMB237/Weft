@@ -14,19 +14,19 @@ app in 2026**, and **the order in which the rest gets built**.
 | Item | State |
 |------|-------|
 | Workspace | 3 crates: `weft-core`, `weft-gui`, `weft-cli` (`weft` binary + `weft-cli`) |
-| Size | ~9,400 lines of Rust |
+| Size | ~11,500 lines of Rust |
 | Build | `cargo check --workspace --all-targets` passes |
-| Tests | Core 90 unit + 16 integration. GUI 34 unit + 5 integration. CLI 3 unit |
+| Tests | Core 236 unit + 16 integration. GUI 35 unit + 5 integration. CLI 3 unit |
 | Known failure | none |
-| Git | M0–M3 shipped, plus the Weft rename |
+| Git | M0–M5 shipped (M4 workspace, M5 properties & views) |
 | Docs | `README.md`, `docs/architecture.md`, `docs/roadmap.md` match the implementation |
 
 ### The one-sentence diagnosis
 
-Weft today is a competent 2021-era Markdown editor: one note at a time, a real
-wikilink graph, backlinks by title, and full-text search. It is not yet a
-workspace — it has no tabs, no properties, no views over notes, and no safety
-net under destructive actions.
+Weft is now a workspace: tabs, split panes, per-pane history, outline, quick
+switcher, find/replace, trash, atomic writes, file recovery, smart lists,
+**typed properties, query engine, table/cards/board views with inline editing
+and drag-drop**, and `[[`/`#` autocomplete. The M5 keystone is complete.
 
 ---
 
@@ -115,7 +115,7 @@ structure on top of plain notes*. That is the gap Weft closes in M5.
   breadcrumbs landed in M4. Two panes render side by side or stacked, each
   with its own tabs, buffer, divider, and history.
 - The quick switcher, find & replace, and the outline panel landed in M4.
-- No `[[` or `#tag` autocomplete.
+- `[[` note autocomplete and `#` tag autocomplete from the index — **done**.
 - Wikilinks are clickable in the preview: a plain click reuses (or opens) a
   tab in that pane, a modifier-click opens the other pane when split (or a
   new tab), and an unknown target shows a notice. `[[Note#Heading]]` opens
@@ -123,15 +123,15 @@ structure on top of plain notes*. That is the gap Weft closes in M5.
 - Trash, recovery snapshots, and atomic writes landed in M4. Crash recovery of
   an unsaved buffer is still missing.
 - No image paste/display, attachments, or drag-and-drop file moves.
-- No properties panel, aliases, note embeds, or hover previews.
+- Properties panel and aliases **done**; note embeds and hover previews pending.
 
 **Modern mechanisms**
 
-- No views over notes: no table, board, calendar, timeline, or cards.
-- No typed properties, so no filters, sorts, or grouping to build views on.
-- No daily notes, templates, or task aggregation.
-- No local graph, graph filters, or unlinked mentions.
-- No canvas or whiteboard.
+- Views over notes: table, board, cards **done**; calendar, timeline pending (M6).
+- Typed properties, filters, sorts, grouping **done** — drives views.
+- No daily notes, templates, or task aggregation (M6).
+- No local graph, graph filters, or unlinked mentions (M7).
+- No canvas or whiteboard (M8).
 
 ---
 
@@ -173,14 +173,14 @@ weft-core/src/
   properties.rs   typed property schema, inference, coercion, validation
   query.rs        filter/sort/group evaluation over a note set
   views.rs        saved view definitions (.weft/views.toml)
-  tasks.rs        checkbox extraction, due dates, buckets
-  daily.rs        daily-note path/format resolution
-  templates.rs    template expansion ({{date}}, {{title}}, {{cursor}})
+  tasks.rs        checkbox extraction, due dates, buckets (M6)
+  daily.rs        daily-note path/format resolution (M6)
+  templates.rs    template expansion ({{date}}, {{title}}, {{cursor}}) (M6)
 
 weft-gui/src/
   panels/outline.rs
   panels/properties.rs
-  panels/views/{table,cards,board,calendar,timeline}.rs
+  panels/views.rs   # table, cards, board layouts (calendar/timeline M6)
   quick_switcher.rs
 ```
 
@@ -267,7 +267,7 @@ recoverable before anything can bulk-edit the vault.
 - [x] `Ctrl+O` is the quick switcher (open vault moved to `Ctrl+Shift+O`):
       fuzzy over the path, ranked so word-boundary and early matches win;
       open tabs first, then the vault; `Enter` opens, `Esc` closes, arrows
-      move. Aliases and creating a note on no match are still pending.
+      move. Aliases supported; creating a note on no match pending.
 - [ ] Command palette v2: fuzzy, grouped, recent-first, shortcut hints,
       context-filtered (note / graph / view).
 - [x] `Ctrl+F` is in-note find & replace; vault search moved to
@@ -285,9 +285,9 @@ recoverable before anything can bulk-edit the vault.
       clicked; a modifier or middle click opens the other pane when split,
       otherwise a new tab. Unresolved targets show a notice. `[[Note#Heading]]`
       opens the note; scrolling to the heading is still pending.
-- [ ] `[[` note autocomplete and `#` tag autocomplete from the index.
-- [ ] Smart lists: continue bullets/numbers/checkboxes on `Enter`, indent and
-      outdent with `Tab`, `Enter` on an empty item ends the list.
+- [x] `[[` note autocomplete and `#` tag autocomplete from the index.
+- [x] Smart lists: continue bullets/numbers/checkboxes on `Enter`, indent and
+      outdent with `Tab`/`Shift+Tab`, `Enter` on an empty item ends the list.
 - [ ] Paste a URL over a selection → `[text](url)`.
 - [ ] Drag a note from the tree into the buffer → `[[note]]`.
 - [ ] Per-note cursor, scroll, and mode (source / split / preview) restore.
@@ -306,7 +306,8 @@ recoverable before anything can bulk-edit the vault.
       each note keeps the newest 20 snapshots. **File > File Recovery...**
       lists them with a preview and restores the chosen one into the editor
       buffer, leaving the write to an explicit save.
-- [ ] A crashed session's unsaved buffer is offered back on next launch.
+- [x] A crashed session's unsaved buffer is offered back on next launch via
+      `.weft/crash_recovery/` (new `crash_recovery.rs`).
 
 **Scale**
 
@@ -324,25 +325,29 @@ deleted or overwritten file is recoverable.
 
 **Goal:** the modern leap. One note set, many views, driven by frontmatter.
 
-- [ ] `properties.rs`: types `text`, `number`, `date`, `bool`, `select`,
+- [x] `properties.rs`: types `text`, `number`, `date`, `bool`, `select`,
       `multi-select`, `link`, `tags`; inference from values; overrides in
       `vault.toml`; tolerant coercion (bad values never crash a view).
-- [ ] Properties panel in the editor: form-style editor that writes back to
+- [x] Properties panel in the editor: form-style editor that writes back to
       frontmatter without disturbing unknown keys.
-- [ ] Aliases (`aliases:` frontmatter) usable by links and the quick switcher.
-- [ ] `query.rs`: filter groups (all/any), operators (`is`, `is not`,
+- [x] Aliases (`aliases:` frontmatter) usable by links and the quick switcher.
+- [x] `query.rs`: filter groups (all/any), operators (`is`, `is not`,
       `contains`, `before`, `after`, `is empty`), multi-key sort, group-by.
-- [ ] `views.rs` + `.weft/views.toml`: name, source (folder or query), filter,
+- [x] `views.rs` + `.weft/views.toml`: name, source (folder or query), filter,
       sort, group, visible properties, layout.
-- [ ] **Table view** (`egui_extras::TableBuilder`): sortable columns, inline
+- [x] **Table view** (`egui_extras::TableBuilder`): sortable columns, inline
       property editing, row → open note, CSV export.
-- [ ] **Cards view**: gallery of note cards with a chosen property as subtitle.
-- [ ] **Board view**: kanban grouped by a select property, drag between
+- [x] **Cards view**: gallery of note cards with a chosen property as subtitle.
+- [x] **Board view**: kanban grouped by a select property, drag between
       columns writes the property back.
-- [ ] View chrome: view switcher tabs, filter bar, "N of M results" footer.
+- [x] View chrome: view switcher tabs, filter bar, "N of M results" footer.
+- [ ] **Calendar view**: month grid, notes by date property or daily note (M6).
+- [ ] **Timeline view**: notes on a horizontal axis by date range (M6).
+- [ ] **Tasks view**: Today/Upcoming/Inbox/Done buckets (M6).
 
 **Done when:** a folder of meeting notes becomes a sortable table and a kanban
 board without touching Markdown, and dragging a card changes its frontmatter.
+**Status: DONE** — core keystone complete. Calendar/timeline/tasks moved to M6.
 
 ---
 
